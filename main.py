@@ -60,7 +60,7 @@ if __name__ == '__main__':
   parser.add_argument("--print_grad_norm", action='store_true', help="Print of the norm of the gradients")
   parser.add_argument("--frequency_log_steps", type=int, default=1000, help="Print log for every step.")
   parser.add_argument("--logging_verbosity", type=str, default='INFO', help="Level of verbosity of the logs")
-  parser.add_argument("--save_checkpoint_epochs", type=int, default=5, help="Save checkpoint every epoch.")
+  parser.add_argument("--save_checkpoint_epochs", type=int, default=1, help="Save checkpoint every epoch.")
 
   parser.add_argument("--activation", type=str, default='relu', choices=['relu', 'tanh'])
   parser.add_argument("--penalizeCurvature", type=bool, default=False)
@@ -100,6 +100,8 @@ if __name__ == '__main__':
     config = override_args(config, 50, 90, 10, 2048)
   elif config.model_name == 'xlarge':
     config = override_args(config, 70, 120, 15, 2048)
+  elif config.model_name == 'xsmall':
+    config = override_args(config, 3, 15, 1, 1024)
   elif config.model_name is None and \
       not all([config.depth, config.num_channels, config.depth_linear, config.n_features]):
     ValueError("Choose --model-name 'small' 'medium' 'large' 'xlarge'")

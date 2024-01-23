@@ -83,29 +83,56 @@ class Evaluator:
 
         self.load_ckpt()
         if self.config.mode == "certified":
+            accuracy, cert_rad, lip_cert_rad, curv_cert_rad, grad_norm, margins, corrects = self.evaluate_certified_radius()
+            M = self.model.module.model.calculateCurvature().unsqueeze(0) * np.sqrt(2)
+            for eps in [36, 72, 108, 255]:
+                eps_float = eps / 255
+                lip_cst_imp = torch.minimum(grad_norm + M * eps_float, torch.ones_like(grad_norm) * np.sqrt(2.))
+                lip_cert_rad_imp = self.evaluate_certified_radius_lip(lip_cst_imp, margins) * corrects
+                cert_rad = torch.maximum(cert_rad, lip_cert_rad_imp)
+                #
+                cert_acc = (cert_rad > eps_float).sum() / cert_rad.shape[0]
+                lip_cert_acc = (lip_cert_rad > eps_float).sum() / lip_cert_rad.shape[0]
+                curv_cert_acc = (curv_cert_rad > eps_float).sum() / curv_cert_rad.shape[0]
+                lip_cert_acc_imp = (lip_cert_rad_imp > eps_float).sum() / lip_cert_rad_imp.shape[0]
+                # 
+                self.message.add('eps', [eps, 255], format='.0f')
+                self.message.add('eps', eps_float, format='.5f')
+                self.message.add('accuracy', accuracy, format='.5f')
+                self.message.add('certified acc', cert_acc, format='.5f')
+                self.message.add('certified acc lip', lip_cert_acc, format='.5f')
+                self.message.add('certified acc curv', curv_cert_acc, format='.5f')
+                self.message.add('certified acc lip imp', lip_cert_acc_imp, format='.5f')
+                print(self.message.get_message())
+                logging.info(self.message.get_message())
             # for eps in [36, 72, 108, 255]:
-            for eps in [36]:
-                if self.config.last_layer == 'lln':
-                    self.eval_certified_lln(eps)
-                else:
-                    self.eval_certified(eps)
-                    # self.eval_certified_plot(eps)
+            # for eps in [36]:
+            #     if self.config.last_layer == 'lln':
+            #         self.eval_certified_lln(eps)
+            #     else:
+            #         self.eval_certified(eps)
+            #         # self.eval_certified_plot(eps)
         elif self.config.mode == "attack":
             self.eval_attack()
 
         logging.info("Done with batched inference.")
         delattr(self, 'model')
 
+    @torch.no_grad()
+    def evaluate_certified_radius_lip(self, lip_cst, margins):
+        lip_cert_rad = (margins[:, -1] - margins[:, -2]) / lip_cst
+        return lip_cert_rad
+
 
     @torch.no_grad()
-    def eval_certified(self, eps):
+    def evaluate_certified_radius(self):
         print("evaluating certified accuracy")
-        eps_float = eps / 255
         self.model.eval()
         running_accuracy = 0
-        running_certified = 0
-        running_certified_lip, running_certified_lip_imp, running_certified_curv = 0, 0, 0
         running_inputs = 0
+        lip_cert_rad, curv_cert_rad = [], []
+        Ms, grad_norms, marginss = [], [], []
+        corrects = []
         lip_cst = np.sqrt(2.)
         data_loader, _ = self.reader.load_dataset()
         for batch_n, data in tqdm(enumerate(data_loader), total=len(data_loader)):
@@ -114,47 +141,94 @@ class Evaluator:
             outputs = self.model(inputs)
             predicted = outputs.argmax(axis=1)
             correct = outputs.max(1)[1] == labels
+            corrects.append(correct)
             margins, index = torch.sort(outputs, 1)
-            # Lip sqrt 2
-            certified_lip = (margins[:, -1] - margins[:, -2]) >  lip_cst * eps_float
-            running_certified_lip += torch.sum(correct & certified_lip).item()
+
+            # Lip
+            tmp = self.evaluate_certified_radius_lip(lip_cst, margins)
+            lip_cert_rad.append(tmp * correct)
+
             # Curv
-            cert_tmp = torch.zeros_like(certified_lip)
             if isinstance(self.model, nn.DataParallel):
                 activ = self.model.module.model.stable_block[0].activation
             else:
                 activ = self.model.model.stable_block[0].activation
             if isinstance(activ, nn.Tanh):
-                cert_tmp, __, lip_improved = self.secondOrderCert(inputs, margins, index, eps_float)
-                running_certified_curv += torch.sum(correct & cert_tmp).item()
-                lip_improved = torch.minimum(lip_improved, torch.ones_like(lip_improved) * lip_cst)
-                certified_lip_imp = (margins[:, -1] - margins[:, -2]) >  lip_improved * eps_float
-                running_certified_lip_imp += torch.sum(correct & certified_lip_imp).item()
+                tmp, grad_norm, M = self.secondOrderCert(inputs, margins, index)
+                Ms.append(M); grad_norms.append(grad_norm); marginss.append(margins)
+                curv_cert_rad.append(tmp * correct)
                 
             running_accuracy += predicted.eq(labels.data).cpu().sum().numpy()
-            certified = torch.logical_or(cert_tmp, torch.logical_or(certified_lip, certified_lip_imp))
-            running_certified += torch.sum(correct & certified).item()
             running_inputs += inputs.size(0)
+            
         self.model.train()
         accuracy = running_accuracy / running_inputs
-        certified = running_certified / running_inputs
-        self.message.add('eps', [eps, 255], format='.0f')
-        self.message.add('eps', eps_float, format='.5f')
-        self.message.add('accuracy', accuracy, format='.5f')
-        self.message.add('certified acc', certified, format='.5f')
-        self.message.add('certified acc lip', running_certified_lip / running_inputs, format='.5f')
-        self.message.add('certified acc lip imp', running_certified_lip_imp / running_inputs, format='.5f')
-        self.message.add('certified acc curv', running_certified_curv / running_inputs, format='.5f')
+        curv_cert_rad = torch.hstack(curv_cert_rad)
+        lip_cert_rad = torch.hstack(lip_cert_rad)
+        margins = torch.vstack(marginss); grad_norm = torch.hstack(grad_norms); M = torch.hstack(Ms)
+        cert_rad = torch.maximum(curv_cert_rad, lip_cert_rad)
+        corrects = torch.hstack(corrects)
+        return accuracy, cert_rad, lip_cert_rad, curv_cert_rad, grad_norm, margins, corrects
 
-        if self.wandb:
-            wandb.log({"accuracy": accuracy, "certified accuracy " + str(eps): certified})
-        message = self.message.get_message()
-        logging.info(message)
-        print(message)
+    # @torch.no_grad()
+    # def eval_certified(self, eps):
+    #     print("evaluating certified accuracy")
+    #     eps_float = eps / 255
+    #     self.model.eval()
+    #     running_accuracy = 0
+    #     running_certified = 0
+    #     running_certified_lip, running_certified_lip_imp, running_certified_curv = 0, 0, 0
+    #     running_inputs = 0
+    #     lip_cst = np.sqrt(2.)
+    #     data_loader, _ = self.reader.load_dataset()
+    #     for batch_n, data in tqdm(enumerate(data_loader), total=len(data_loader)):
+    #         inputs, labels = data
+    #         inputs, labels = inputs.cuda(), labels.cuda()
+    #         outputs = self.model(inputs)
+    #         predicted = outputs.argmax(axis=1)
+    #         correct = outputs.max(1)[1] == labels
+    #         margins, index = torch.sort(outputs, 1)
+    #         # Lip sqrt 2
+    #         certified_lip = (margins[:, -1] - margins[:, -2]) >  lip_cst * eps_float
+    #         running_certified_lip += torch.sum(correct & certified_lip).item()
+    #         # Curv
+    #         cert_tmp = torch.zeros_like(certified_lip)
+    #         if isinstance(self.model, nn.DataParallel):
+    #             activ = self.model.module.model.stable_block[0].activation
+    #         else:
+    #             activ = self.model.model.stable_block[0].activation
+    #         if isinstance(activ, nn.Tanh):
+    #             cert_tmp, __, lip_improved = self.secondOrderCert(inputs, margins, index, eps_float)
+    #             running_certified_curv += torch.sum(correct & cert_tmp).item()
+    #             lip_improved = torch.minimum(lip_improved, torch.ones_like(lip_improved) * lip_cst)
+    #             certified_lip_imp = (margins[:, -1] - margins[:, -2]) >  lip_improved * eps_float
+    #             running_certified_lip_imp += torch.sum(correct & certified_lip_imp).item()
+                
+    #         running_accuracy += predicted.eq(labels.data).cpu().sum().numpy()
+    #         certified = torch.logical_or(cert_tmp, torch.logical_or(certified_lip, certified_lip_imp))
+    #         running_certified += torch.sum(correct & certified).item()
+    #         running_inputs += inputs.size(0)
+    #         break
+    #     self.model.train()
+    #     accuracy = running_accuracy / running_inputs
+    #     certified = running_certified / running_inputs
+    #     self.message.add('eps', [eps, 255], format='.0f')
+    #     self.message.add('eps', eps_float, format='.5f')
+    #     self.message.add('accuracy', accuracy, format='.5f')
+    #     self.message.add('certified acc', certified, format='.5f')
+    #     self.message.add('certified acc lip', running_certified_lip / running_inputs, format='.5f')
+    #     self.message.add('certified acc lip imp', running_certified_lip_imp / running_inputs, format='.5f')
+    #     self.message.add('certified acc curv', running_certified_curv / running_inputs, format='.5f')
 
-        return accuracy, certified
+    #     if self.wandb:
+    #         wandb.log({"accuracy": accuracy, "certified accuracy " + str(eps): certified})
+    #     message = self.message.get_message()
+    #     logging.info(message)
+    #     print(message)
+
+    #     return accuracy, certified
     
-    def secondOrderCert(self, inputs, margins, index, eps_float, useQueryCoefficients=False):
+    def secondOrderCert(self, inputs, margins, index, useQueryCoefficients=False):
         queryCoefficient = torch.zeros(inputs.shape[0], self.model.module.model.n_classes).cuda()
         queryCoefficient[torch.arange(inputs.shape[0]), index[:, -1]] += 1
         queryCoefficient[torch.arange(inputs.shape[0]), index[:, -2]] += -1
@@ -170,12 +244,14 @@ class Evaluator:
             M *= np.sqrt(2)
         if self.wandb:
             wandb.log({"Curvature Bound": M})
-        diff = margins[:, -2] - margins[:, -1]
-        cert_rad = (-grad_norm + torch.sqrt(grad_norm**2 - 2 * M * diff)) / M 
-        cert_tmp = cert_rad > eps_float
-        # 
-        lip_improved = grad_norm + eps_float * M
-        return cert_tmp, cert_rad, lip_improved
+        
+        if True:
+            diff = margins[:, -2] - margins[:, -1]
+            cert_rad = (-grad_norm + torch.sqrt(grad_norm**2 - 2 * M * diff)) / M 
+        else:
+            cert_rad = newton_step_cert(inputs, index[:, -1], index[:, -2], self.model, M, queryCoefficient)
+
+        return cert_rad, grad_norm, M
 
 
     @torch.no_grad()
@@ -421,3 +497,51 @@ def evaluate_madry(loader, model, epsilon, verbose, device=torch.device("cuda"),
               'Error {error.avg:.3f}'
               .format(error=errors, perror=perrors))
     return perrors.avg
+
+
+def newton_step_cert(x0, true_label, false_target, model, M, queryCoefficient, verbose=True):
+        def grad_f(x):
+            return torch.einsum('ij,ij->i', queryCoefficient, model(x))
+
+        batch_size = x0.shape[0]
+        
+        eta = torch.zeros((batch_size, 1)).cuda()
+        eta_min = -1/M*torch.ones((batch_size, 1, 1, 1)).cuda()
+        eta_max =  1/M*torch.ones((batch_size, 1, 1, 1)).cuda()
+        eta = (eta_min + eta_max)/2.
+
+        x = x0.clone()
+        outer_iters = 10
+        inner_iters = 10
+        for i in range(outer_iters):
+            for j in range(inner_iters):
+                g_batch = jacobian(grad_f, x).sum(dim=1)
+                dual_grad = eta*g_batch - eta*M*x - x0
+                dual_hess = 1 + eta*M
+                x = -torch.reciprocal(dual_hess)*dual_grad
+
+
+            if i < outer_iters:
+                logits = model(x)
+                logits_diff = logits[torch.arange(batch_size), true_label] - logits[torch.arange(batch_size), false_target]
+                ge_indicator = (logits_diff > 0)
+                eta_min[ge_indicator] = eta[ge_indicator]
+                eta_max[~ge_indicator] = eta[~ge_indicator]
+                eta = (eta_min + eta_max)/2.
+
+        dist_sqrd = torch.linalg.norm((x-x0).flatten(1), 2, dim=1)**2 + 2*eta[:, 0, 0, 0]*logits_diff
+        lower_bound = torch.sqrt((dist_sqrd>0).float()*dist_sqrd)
+        grad_norm = torch.norm((eta*g_batch + (x - x0)).flatten(1), 2, dim=1)
+
+        return lower_bound *(grad_norm < 1e-5)
+
+
+# def gradient_x(x, model, true_label, false_target):
+#     x_var = x.clone()
+#     x_var.requires_grad = True
+#     batch_size = x_var.shape[0]
+#     with torch.enable_grad():
+#         logits = model(x_var)
+#         logits_diff = logits[torch.arange(batch_size), true_label] - logits[torch.arange(batch_size), false_target]
+#     grad_x = torch.autograd.grad(logits_diff.sum(), x_var)[0]
+#     return grad_x

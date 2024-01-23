@@ -287,7 +287,9 @@ class Trainer:
         wandb.log({"loss": loss.item(),
                    "lr": self.optimizer.param_groups[0]['lr']})
         if self.config.penalizeCurvature:
-            loss += 100 * self.model.module.model.calculateCurvature()
+            curv = self.model.module.model.calculateCurvature()
+            loss += 100 * curv
+
         loss.backward()
         self.process_gradients(step)
         self.optimizer.step()
