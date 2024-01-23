@@ -24,7 +24,7 @@ from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 import torch.distributed as dist
 from torch.distributed.elastic.multiprocessing.errors import record
-
+from utils import LossXentHessian
 
 class Trainer:
   """A Trainer to train a PyTorch."""
@@ -271,7 +271,10 @@ class Trainer:
     if step == 0 and self.local_rank == 0:
       logging.info(f'outputs {outputs.shape}')
 
-    loss = self.criterion(outputs, labels)
+    if isinstance(self.criterion, LossXentHessian):
+      pass
+    else:
+      loss = self.criterion(outputs, labels)
     loss.backward()
     self.process_gradients(step)
     self.optimizer.step()

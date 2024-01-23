@@ -17,6 +17,7 @@ from torch.optim import lr_scheduler
 # from advertorch import attacks
 # from autoattack import AutoAttack
 # import pytorch_warmup as warmup
+from torch.autograd.functional import hessian
 
 
 def get_epochs_from_ckpt(filename):
@@ -151,6 +152,24 @@ class MarginBoosting(nn.Module):
     loss = loss1 + loss2
     return loss
 
+class LossXentHessian(LossXent):
+
+  def __init__(self, config):
+    super(LossXentHessian, self).__init__(config)
+    pass
+
+  def __call__(self, net, inputs, outputs, labels):
+    loss = super()(outputs, labels)
+
+    for i in range(len(inputs)):
+        hess = hessian(lambda x: net(x).mean(), inputs[i:i+1], create_graph=True)
+        print(hess.shape)
+        raise
+    # hess_X = net.module.calculateCurvature(selfPairDefaultValue=0)[1]
+    # loss = hess_X[Y, :].mean()
+    # loss += criterion(out, Y)
+
+    return loss
 
 def get_loss(config):
   if config.loss == 'xent':
@@ -161,6 +180,8 @@ def get_loss(config):
     criterion = LossXentMargin(config)
   elif config.loss == 'margin_boosting':
     criterion = MarginBoosting(config)
+  elif config.loss == 'xent+hessian':
+    criterion = LossXentHessian(config)
   return criterion
 
 def get_scheduler(optimizer, config, num_steps):
