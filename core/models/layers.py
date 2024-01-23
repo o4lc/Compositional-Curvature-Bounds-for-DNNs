@@ -109,8 +109,8 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
         # updating eigenVectors
         with torch.no_grad():
             self.wEigen.data = normalize(self.wEigen @ self.weights.T @ self.weights)
-            gForward = (T * (self.gEigen @ self.weights))
-            gBackward = (T * (gForward @ self.weights.T))
+            gForward = (T * self.gEigen) @ self.weights
+            gBackward = T * (gForward @ self.weights.T)
             self.gEigen.data = normalize(gBackward)
         return out
 
@@ -121,7 +121,7 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
         T = -2 / torch.abs(q_inv * self.weights @ self.weights.T * q).sum(1)
 
         wNorm = torch.linalg.norm((self.wEigen @ self.weights.T).flatten(), 2)
-        gForward = (T * (self.gEigen @ self.weights))
+        gForward = (T * self.gEigen) @ self.weights
         gNorm = torch.linalg.norm(gForward.flatten(), 2)
         return wNorm, gNorm
 

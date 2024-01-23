@@ -30,13 +30,15 @@ if __name__ == '__main__':
   # parameters training or eval
   parser.add_argument("--mode", type=str, default="train", choices=['train', 'certified', 'attack'])
   parser.add_argument("--train_dir", type=str, help="Name of the training directory.")
+  parser.add_argument("--trainParentFolder", type=str, help="Name of the training parent directory.",
+                      default='./trained_models')
   parser.add_argument("--data_dir", type=str, help="Name of the data directory.")
   parser.add_argument("--dataset", type=str,  default='cifar10', help="Dataset to use")
 
   parser.add_argument("--shift_data", type=bool, default=True, help="Shift dataset with mean.")
   parser.add_argument("--normalize_data", action='store_true', help="Normalize dataset.")
 
-  parser.add_argument("--epochs", type=int, default=1000, help="Number of epochs for training.")
+  parser.add_argument("--epochs", type=int, default=200, help="Number of epochs for training.")
   parser.add_argument("--loss", type=str, default="xent", help="Define the loss to use for training.")
   parser.add_argument("--margin", type=float, default=0.7, help="Define margin")
   parser.add_argument("--offset", type=float, default=np.sqrt(2)*3/2)
@@ -53,12 +55,15 @@ if __name__ == '__main__':
   parser.add_argument("--gamma", type=float, help="Gamma for MultiStepLR")
   parser.add_argument("--gradient_clip_by_norm", type=float, default=None)
   parser.add_argument("--gradient_clip_by_value", type=float, default=None)
-  parser.add_argument("--batch_size", type=int, default=64)
+  parser.add_argument("--batch_size", type=int, default=256)
   parser.add_argument("--seed", type=int, help="Make the training deterministic.")
   parser.add_argument("--print_grad_norm", action='store_true', help="Print of the norm of the gradients")
   parser.add_argument("--frequency_log_steps", type=int, default=1000, help="Print log for every step.")
   parser.add_argument("--logging_verbosity", type=str, default='INFO', help="Level of verbosity of the logs")
   parser.add_argument("--save_checkpoint_epochs", type=int, default=5, help="Save checkpoint every epoch.")
+
+  parser.add_argument("--activation", type=str, default='relu', choices=['relu', 'tanh'])
+  parser.add_argument("--penalizeCurvature", type=bool, default=False)
 
   # specific parameters for eval
   parser.add_argument("--attack", type=str, choices=['pgd', 'autoattack'], help="Choose the attack.")
@@ -105,8 +110,8 @@ if __name__ == '__main__':
     config.data_dir = os.environ.get('DATADIR', None)
   if config.data_dir is None:
     ValueError("the following arguments are required: --data_dir")
-  os.makedirs('./trained_models', exist_ok=True)
-  path = realpath('./trained_models')
+  os.makedirs(config.trainParentFolder, exist_ok=True)
+  path = realpath(config.trainParentFolder)
   if config.train_dir is None:
     ValueError("--train_dir must be defined.")
   elif config.mode == 'train' and config.train_dir is not None:
@@ -122,6 +127,7 @@ if __name__ == '__main__':
   if config.mode == 'attack' and config.attack is None:
     ValueError('With mode=attack, the following arguments are required: --attack')
 
+  assert config.warmup_scheduler == 0  # due to library import errors, this is not supported on my device
   main(config)
 
 
