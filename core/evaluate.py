@@ -168,8 +168,6 @@ class Evaluator:
         else:
             M = self.model.module.model.calculateCurvature().unsqueeze(0)
             M *= np.sqrt(2)
-        if self.wandb:
-            wandb.log({"Curvature Bound": M})
         diff = margins[:, -2] - margins[:, -1]
         cert_rad = (-grad_norm + torch.sqrt(grad_norm**2 - 2 * M * diff)) / M 
         cert_tmp = cert_rad > eps_float

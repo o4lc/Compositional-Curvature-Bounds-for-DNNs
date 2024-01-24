@@ -25,12 +25,14 @@ class BaseReader:
     self.num_workers = 10
     self.prefetch_factor = self.batch_size * 2
     # self.path = join(self.get_data_dir(), self.config.dataset)
-    self.path = join("../data", "cifar-10-batches-py")
+    self.path = join("../data", self.get_data_dir())
 
 
   def get_data_dir(self):
-    print(self.config.data_dir)
-    raise
+    if self.config.dataset in ['cifar10', 'cifar100']:
+      return "cifarpy"
+    else:
+      raise NotImplementedError
     paths = self.config.data_dir.split(':')
     data_dir = None
     for path in paths:
@@ -58,6 +60,54 @@ class BaseReader:
                         prefetch_factor=self.prefetch_factor,
                         sampler=sampler)
     return loader, sampler
+
+class MNISTReader(BaseReader):
+  def __init__(self, config, batch_size, num_gpus, is_training):
+    super(MNISTReader, self).__init__(
+      config, batch_size, num_gpus, is_training)
+    self.n_classes = 10
+    self.means = (0.0000, )
+    self.stds = (1.0000, )
+    self.is_training = is_training = is_training
+
+    self.batch_size = batch_size
+    self.height, self.width = 28, 28
+    self.n_train_files = 50000
+    self.n_test_files = 10000
+    self.img_size = (None, 1, 28, 28)
+
+    if config.shift_data:
+      self.means = (0.1307,)
+
+    # if self.is_training:
+    #   transform = self.transform()
+    # else:
+    transform = transforms.Compose(
+      [transforms.ToTensor(),
+      ])
+
+    self.dataset = torchvision.datasets.MNIST(root='../data', train=self.is_training,
+                                            download=True, transform=transform)
+
+  def transform(self):
+    hue = 0.02
+    saturation = (.3, 2.)
+    brightness = 0.1
+    contrast = (.5, 2.)
+    if self.is_training:
+      transform = transforms.Compose([
+        transforms.RandomCrop(28, padding=4, padding_mode='reflect'),
+        transforms.RandomHorizontalFlip(),
+        transforms.ColorJitter(
+          brightness=brightness, contrast=contrast,
+          saturation=saturation, hue=hue),
+        transforms.ToTensor(),
+      ])
+    else:
+      transform = transforms.Compose([
+        transforms.ToTensor(),
+      ])
+    return transform
 
 
 class CIFARReader(BaseReader):
@@ -116,9 +166,10 @@ class CIFAR10Reader(CIFARReader):
     testTransform = transforms.Compose(
       [transforms.ToTensor(),
        ])
-
-    self.dataset = torchvision.datasets.CIFAR10(root='../data', train=self.is_training,
-                                            download=True, transform=testTransform)
+    self.dataset = torchvision.datasets.CIFAR10(root=self.path, train=self.is_training,
+                                                download=True, transform=testTransform)
+    # self.dataset = torchvision.datasets.CIFAR10(root='../data', train=self.is_training,
+    #                                         download=True, transform=testTransform)
 
 
 class CIFAR100Reader(CIFARReader):
@@ -134,7 +185,7 @@ class CIFAR100Reader(CIFARReader):
 
     transform = self.transform()
     self.dataset = CIFAR100(self.path, train=self.is_training,
-                           download=False, transform=transform)
+                           download=True, transform=transform)
 
 
 class TinyImageNetReader(BaseReader):
@@ -142,6 +193,7 @@ class TinyImageNetReader(BaseReader):
   def __init__(self, config, batch_size, num_gpus, is_training):
     super(TinyImageNetReader, self).__init__(
       config, batch_size, num_gpus, is_training)
+    raise NotImplementedError('TinyImageNetReader data dir not correct. Fix ...')
     self.batch_size = batch_size
     self.is_training = is_training
     self.n_classes = 200
@@ -186,6 +238,7 @@ class TinyImageNetReader(BaseReader):
 
 
 readers_config = {
+  'mnist': MNISTReader,
   'cifar10': CIFAR10Reader,
   'cifar100': CIFAR100Reader,
   'tiny-imagenet': TinyImageNetReader

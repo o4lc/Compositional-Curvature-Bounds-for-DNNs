@@ -38,6 +38,12 @@ class Trainer:
         self.config.mode = "certified"
         self.evaluate = Evaluator(self.config, wandb=True)
 
+        self.regularizerCoefficient = config.hessianRegularizerCoefficient
+        self.regularizerStepSize = config.hessianRegularizerPrimalDualStepSize
+        self.pdEpsilon = config.hessianRegularizerPrimalDualEpsilon
+        self.accuracyMovingAverage = 0
+        self.movingAverageFactor = 0.1
+
     def _load_state(self):
         # load last checkpoint
         checkpoints = glob.glob(join(self.train_dir, 'checkpoints', 'model.ckpt-*.pth'))
@@ -212,8 +218,6 @@ class Trainer:
                     self._print_approximated_train_time(start_time)
                 global_step += 1
 
-
-
         self._save_ckpt(global_step, epoch_id, final=True)
         logging.info("Done training -- epoch limit reached.")
 
@@ -284,10 +288,25 @@ class Trainer:
             logging.info(f'outputs {outputs.shape}')
 
         loss = self.criterion(outputs, labels)
-        wandb.log({"loss": loss.item(),
+        wandb.log({"xent loss": loss.item(),
                    "lr": self.optimizer.param_groups[0]['lr']})
         if self.config.penalizeCurvature:
-            loss += 100 * self.model.module.model.calculateCurvature()
+            modelCurvature = self.model.module.model.calculateCurvature()
+
+            accuracy = (torch.sum(torch.argmax(outputs, 1) == labels) / labels.shape[0]).item()
+            self.accuracyMovingAverage = (self.movingAverageFactor * accuracy +
+                                          (1 - self.movingAverageFactor) * self.accuracyMovingAverage)
+            self.regularizerCoefficient = (
+                max(self.regularizerCoefficient +
+                    (self.accuracyMovingAverage - self.pdEpsilon) * self.regularizerStepSize, 0))
+            loss += self.regularizerCoefficient * modelCurvature
+
+            wandb.log({"Curvature Bound": modelCurvature.item(),
+                       "Regularizer Coefficient": self.regularizerCoefficient,
+                       "moving average accuracy": self.accuracyMovingAverage,
+                       "accuracy": accuracy,
+                       "total loss": loss.item(),})
+
         loss.backward()
         self.process_gradients(step)
         self.optimizer.step()
