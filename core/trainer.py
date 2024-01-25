@@ -41,8 +41,10 @@ class Trainer:
         self.regularizerCoefficient = config.hessianRegularizerCoefficient
         self.regularizerStepSize = config.hessianRegularizerPrimalDualStepSize
         self.pdEpsilon = config.hessianRegularizerPrimalDualEpsilon
+        self.minimumRegularizerCoefficient = config.hessianRegularizerMinimumCoefficient
         self.accuracyMovingAverage = 0
         self.movingAverageFactor = 0.1
+
 
     def _load_state(self):
         # load last checkpoint
@@ -298,7 +300,8 @@ class Trainer:
                                           (1 - self.movingAverageFactor) * self.accuracyMovingAverage)
             self.regularizerCoefficient = (
                 max(self.regularizerCoefficient +
-                    (self.accuracyMovingAverage - self.pdEpsilon) * self.regularizerStepSize, 0))
+                    (self.accuracyMovingAverage - self.pdEpsilon) * self.regularizerStepSize,
+                    self.minimumRegularizerCoefficient))
             loss += self.regularizerCoefficient * modelCurvature
 
             wandb.log({"Curvature Bound": modelCurvature.item(),

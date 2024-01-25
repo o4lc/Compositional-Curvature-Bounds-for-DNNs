@@ -31,6 +31,8 @@ class BaseReader:
   def get_data_dir(self):
     if self.config.dataset in ['cifar10', 'cifar100']:
       return "cifarpy"
+    elif self.config.dataset == 'mnist':
+      return ""
     else:
       raise NotImplementedError
     paths = self.config.data_dir.split(':')
@@ -86,7 +88,7 @@ class MNISTReader(BaseReader):
       [transforms.ToTensor(),
       ])
 
-    self.dataset = torchvision.datasets.MNIST(root='../data', train=self.is_training,
+    self.dataset = torchvision.datasets.MNIST(root=self.path, train=self.is_training,
                                             download=True, transform=transform)
 
   def transform(self):

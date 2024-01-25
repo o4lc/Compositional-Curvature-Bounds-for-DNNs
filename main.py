@@ -71,6 +71,10 @@ if __name__ == '__main__':
                       help="Step size for the primal dual of the hessian regularizer", default=0.001)
   parser.add_argument("--hessianRegularizerPrimalDualEpsilon", type=float,
                       help="Epsilon for the primal dual of the hessian regularizer", default=0.5)
+  parser.add_argument("--hessianRegularizerMinimumCoefficient", type=float,
+                      help="Minimum regularizer coefficient for the primal dual of the hessian regularizer",
+                      default=0.0001)
+
 
   # specific parameters for eval
   parser.add_argument("--attack", type=str, choices=['pgd', 'autoattack'], help="Choose the attack.")
