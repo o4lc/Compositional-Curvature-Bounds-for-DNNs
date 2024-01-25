@@ -66,10 +66,11 @@ class SDPBasedLipschitzConvLayer(nn.Module):
 
         wForward = F.conv2d(self.wEigen, self.kernel, padding=1)
         wNorm = torch.linalg.norm(wForward.flatten(), 2)
+        wNorm2Inf = torch.max(torch.linalg.norm(self.kernel.flatten(1), 2, 1))
 
         gForward = F.conv_transpose2d(T[None, :, None, None] * self.gEigen, self.kernel, padding=1)
         gNorm = torch.linalg.norm(gForward.flatten(), 2)
-        return wNorm, gNorm
+        return wNorm, gNorm, wNorm2Inf
 
 
 class SDPBasedLipschitzLinearLayer(nn.Module):
@@ -121,9 +122,10 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
         T = -2 / torch.abs(q_inv * self.weights @ self.weights.T * q).sum(1)
 
         wNorm = torch.linalg.norm((self.wEigen @ self.weights.T).flatten(), 2)
+        wNorm2Inf = torch.max(torch.linalg.norm(self.weights, 2, 1))
         gForward = (T * self.gEigen) @ self.weights
         gNorm = torch.linalg.norm(gForward.flatten(), 2)
-        return wNorm, gNorm
+        return wNorm, gNorm, wNorm2Inf
 
 class PaddingChannels(nn.Module):
 
