@@ -107,6 +107,7 @@ class LossXent(nn.Module):
     super(LossXent, self).__init__()
     self.criterion = nn.CrossEntropyLoss()
     self.n_classes = {
+      'mnist': 10,
       'cifar10': 10,
       'cifar100': 100,
       'tiny-imagenet': 200

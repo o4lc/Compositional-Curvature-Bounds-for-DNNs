@@ -245,5 +245,3 @@ readers_config = {
   'cifar100': CIFAR100Reader,
   'tiny-imagenet': TinyImageNetReader
 }
-
-
