@@ -128,6 +128,10 @@ class LipschitzNetwork(nn.Module):
         return curvatureTillHere
 
     def updateLipschitz(self, inputs, eps, hessians):
+        raise NotImplementedError
+        """
+        Note that the "inputs" must be normalized by the model.normalize function. 
+        """
         count = 0
         # inputs = self.conv1(inputs)
         updatedLipschitz = []
@@ -142,28 +146,26 @@ class LipschitzNetwork(nn.Module):
         #         print(updatedLipschitz[-1], hessians[count - 1], derivativeNorms)
 
 
-        # derivatives = jacobian(lambda x: self.stable_block(self.conv1(x)).sum(0),
-        #                                inputs, create_graph=False).permute(3, 0, 1, 2, 4, 5, 6).flatten(4).flatten(1, 3)
-        # count = len(self.stable_block) - 1
-        # derivativeNorms = torch.linalg.norm(derivatives, 2, dim=(1, 2)).unsqueeze(1)
-        # updatedLipschitz.append(derivativeNorms + eps * hessians[count - 1])
-        # print(updatedLipschitz[-1], hessians[count - 1], derivativeNorms)
+        derivatives = jacobian(lambda x: self.stable_block(self.conv1(x)).sum(0),
+                                       inputs, create_graph=False).permute(3, 0, 1, 2, 4, 5, 6).flatten(4).flatten(1, 3)
+        count = len(self.stable_block) - 1
+        derivativeNorms = torch.linalg.norm(derivatives, 2, dim=(1, 2)).unsqueeze(1)
+        updatedLipschitz.append(derivativeNorms + eps * hessians[count - 1])
+        print(updatedLipschitz[-1], hessians[count - 1], derivativeNorms)
 
 
-        # numberOfLinears = 7
-        # derivatives = jacobian(lambda x: self.layers_linear[:numberOfLinears + 1](self.stable_block(self.conv1(x))),
-        #                        inputs, create_graph=False).sum(0).permute(1, 0, 2, 3, 4).flatten(2)
-        # count = len(self.stable_block) - 1
-        # derivativeNorms = torch.linalg.norm(derivatives, 2, dim=(1, 2)).unsqueeze(1)
-        # updatedLipschitz.append(derivativeNorms + eps * hessians[count - 1 + numberOfLinears])
-        # print(updatedLipschitz[-1], hessians[count - 1 + numberOfLinears], derivativeNorms)
+        numberOfLinears = 7
+        derivatives = jacobian(lambda x: self.layers_linear[:numberOfLinears + 1](self.stable_block(self.conv1(x))),
+                               inputs, create_graph=False).sum(0).permute(1, 0, 2, 3, 4).flatten(2)
+        count = len(self.stable_block) - 1
+        derivativeNorms = torch.linalg.norm(derivatives, 2, dim=(1, 2)).unsqueeze(1)
+        updatedLipschitz.append(derivativeNorms + eps * hessians[count - 1 + numberOfLinears])
+        print(updatedLipschitz[-1], hessians[count - 1 + numberOfLinears], derivativeNorms)
 
         derivatives = jacobian(lambda x: self.last_last(self.base(x)).sum(0),
                                inputs, create_graph=False).permute(1, 0, 2, 3, 4).flatten(2)
         derivativeNorms = torch.linalg.norm(derivatives, 2, dim=(1, 2)).unsqueeze(1)
         print(derivativeNorms)
-        print(jacobian(lambda x: self.base(x).sum(0),
-                               inputs, create_graph=False).shape)
         derivatives = jacobian(lambda x: self.base(x).sum(0),
                                inputs, create_graph=False).permute(1, 0, 2, 3, 4).flatten(2)
         derivativeNorms = torch.linalg.norm(derivatives, 2, dim=(1, 2)).unsqueeze(1)
