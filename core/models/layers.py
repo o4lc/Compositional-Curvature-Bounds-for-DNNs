@@ -39,36 +39,44 @@ class SDPBasedLipschitzConvLayer(nn.Module):
           nn.Parameter(normalize(F.conv2d(torch.randn(input_size), self.kernel, padding=1).detach().clone()),
                        requires_grad=False)
 
+    def computeT(self):
+        method = "abs"
+        if method == "abs":
+            q = torch.abs(self.q)[None, :, None, None]
+            qInv = 1 / torch.abs(self.q)
+        elif method == "exp":
+            q = torch.exp(self.q)[None, :, None, None]
+            qInv = torch.exp(-self.q)
+        kkt = F.conv2d(self.kernel, self.kernel, padding=self.kernel.shape[-1] - 1)
+
+        T = (torch.abs(q * kkt).sum((1, 2, 3)) * qInv)
+        return T
+
     def forward(self, x):
         res = F.conv2d(x, self.kernel, bias=self.bias, padding=1)
         res = self.activation(res)
-        batch_size, cout, x_size, x_size = res.shape
-        kkt = F.conv2d(self.kernel, self.kernel, padding=self.kernel.shape[-1] - 1)
-        q_abs = torch.abs(self.q)
-        T = 2 / (torch.abs(q_abs[None, :, None, None] * kkt).sum((1, 2, 3)) / q_abs)
-        res = T[None, :, None, None] * res
+        T = self.computeT()[None, :, None, None]
+        res = - 2 / T * res
         res = F.conv_transpose2d(res, self.kernel, padding=1)
-        out = x - res
+        out = x + res
 
         with torch.no_grad():
             self.wEigen.data = \
               normalize(F.conv_transpose2d(F.conv2d(self.wEigen, self.kernel, padding=1), self.kernel, padding=1))
             self.gEigen.data = \
-              normalize(T[None, :, None, None] * F.conv2d(F.conv_transpose2d(
-                T[None, :, None, None] * self.gEigen, self.kernel, padding=1), self.kernel, padding=1))
+              normalize(-2 / T * F.conv2d(F.conv_transpose2d(
+                -2 / T * self.gEigen, self.kernel, padding=1), self.kernel, padding=1))
 
         return out
 
     def calculateElementLipschitzs(self):
-        kkt = F.conv2d(self.kernel, self.kernel, padding=self.kernel.shape[-1] - 1)
-        q_abs = torch.abs(self.q)
-        T = 2 / (torch.abs(q_abs[None, :, None, None] * kkt).sum((1, 2, 3)) / q_abs)
+        T = self.computeT()[None, :, None, None]
 
         wForward = F.conv2d(self.wEigen, self.kernel, padding=1)
         wNorm = torch.linalg.norm(wForward.flatten(), 2)
         wNorm2Inf = torch.max(torch.linalg.norm(self.kernel.flatten(1), 2, 1))
 
-        gForward = F.conv_transpose2d(T[None, :, None, None] * self.gEigen, self.kernel, padding=1)
+        gForward = F.conv_transpose2d(-2 / T * self.gEigen, self.kernel, padding=1)
         gNorm = torch.linalg.norm(gForward.flatten(), 2)
         return wNorm, gNorm, wNorm2Inf
 
@@ -96,14 +104,24 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
             nn.Parameter(normalize(torch.randn(1, cout)), requires_grad=False)
         self.wEigen = nn.Parameter(normalize(torch.randn((1, cin))), requires_grad=False)
 
+    def computeT(self):
+        method = "abs"  # "abs", "exp
+        if method == "abs":
+            q_abs = torch.abs(self.q)
+            q = q_abs[None, :]
+            q_inv = (1 / (q_abs + self.epsilon))[:, None]
+        elif method == "exp":
+            q = torch.exp(self.q)[None, :]
+            q_inv = torch.exp(-self.q)[:, None]
+
+        T = torch.abs(q_inv * self.weights @ self.weights.T * q).sum(1)
+        return T
+
     def forward(self, x):
         res = F.linear(x, self.weights, self.bias)
         res = self.activation(res)
-        q_abs = torch.abs(self.q)
-        q = q_abs[None, :]
-        q_inv = (1 / (q_abs + self.epsilon))[:, None]
-        T = 2 / torch.abs(q_inv * self.weights @ self.weights.T * q).sum(1)
-        res = T * res
+        T = self.computeT()
+        res = -2 / T * res
         res = F.linear(res, self.weights.t())
         out = x + res
 
@@ -116,14 +134,10 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
         return out
 
     def calculateElementLipschitzs(self):
-        q_abs = torch.abs(self.q)
-        q = q_abs[None, :]
-        q_inv = (1 / (q_abs + self.epsilon))[:, None]
-        T = -2 / torch.abs(q_inv * self.weights @ self.weights.T * q).sum(1)
-
+        T = self.computeT()
         wNorm = torch.linalg.norm((self.wEigen @ self.weights.T).flatten(), 2)
         wNorm2Inf = torch.max(torch.linalg.norm(self.weights, 2, 1))
-        gForward = (T * self.gEigen) @ self.weights
+        gForward = (-2 / T * self.gEigen) @ self.weights
         gNorm = torch.linalg.norm(gForward.flatten(), 2)
         return wNorm, gNorm, wNorm2Inf
 
