@@ -82,15 +82,15 @@ class LipschitzNetwork(nn.Module):
         for layer in self.stable_block:
             if isinstance(layer, SDPBasedLipschitzConvLayer):
                 wNorm, gNorm, wNorm2Inf = layer.calculateElementLipschitzs()
-                # layerJacobianLipschitz = 4/np.sqrt(27) * wNorm * wNorm2Inf * gNorm
-                layerJacobianLipschitz = 4 / np.sqrt(27) * wNorm ** 2 * gNorm
+                layerJacobianLipschitz = 4/np.sqrt(27) * wNorm * wNorm2Inf * gNorm
+                # layerJacobianLipschitz = 4 / np.sqrt(27) * wNorm ** 2 * gNorm
                 curvatureTillHere = layerJacobianLipschitz * lip ** 2 + lip * curvatureTillHere
 
         for layer in self.layers_linear:
             if isinstance(layer, SDPBasedLipschitzLinearLayer):
                 wNorm, gNorm, wNorm2Inf = layer.calculateElementLipschitzs()
-                # layerJacobianLipschitz = 4/np.sqrt(27) * wNorm * wNorm2Inf * gNorm
-                layerJacobianLipschitz = 4 / np.sqrt(27) * wNorm ** 2 * gNorm
+                layerJacobianLipschitz = 4/np.sqrt(27) * wNorm * wNorm2Inf * gNorm
+                # layerJacobianLipschitz = 4 / np.sqrt(27) * wNorm ** 2 * gNorm
                 curvatureTillHere = layerJacobianLipschitz * lip ** 2 + lip * curvatureTillHere
 
         if isinstance(self.last_last, LinearNormalized):
