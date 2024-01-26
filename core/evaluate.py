@@ -83,30 +83,30 @@ class Evaluator:
 
         self.load_ckpt()
         if self.config.mode == "certified":
-            self.eval_certified_plot(eps=36/255)
+            # self.eval_certified_plot(eps=36/255)
 
-            # accuracy, cert_rad, lip_cert_rad, curv_cert_rad, grad_norm, margins, corrects = self.evaluate_certified_radius()
-            # M = self.model.module.model.calculateCurvature().unsqueeze(0) * np.sqrt(2)
-            # for eps in [36, 72, 108, 255]:
-            #     eps_float = eps / 255
-            #     lip_cst_imp = torch.minimum(grad_norm + M * eps_float, torch.ones_like(grad_norm) * np.sqrt(2.))
-            #     lip_cert_rad_imp = self.evaluate_certified_radius_lip(lip_cst_imp, margins) * corrects
-            #     cert_rad = torch.maximum(cert_rad, lip_cert_rad_imp)
-            #     #
-            #     cert_acc = (cert_rad > eps_float).sum() / cert_rad.shape[0]
-            #     lip_cert_acc = (lip_cert_rad > eps_float).sum() / lip_cert_rad.shape[0]
-            #     curv_cert_acc = (curv_cert_rad > eps_float).sum() / curv_cert_rad.shape[0]
-            #     lip_cert_acc_imp = (lip_cert_rad_imp > eps_float).sum() / lip_cert_rad_imp.shape[0]
-            #     #
-            #     self.message.add('eps', [eps, 255], format='.0f')
-            #     self.message.add('eps', eps_float, format='.5f')
-            #     self.message.add('accuracy', accuracy, format='.5f')
-            #     self.message.add('certified acc', cert_acc, format='.5f')
-            #     self.message.add('certified acc lip', lip_cert_acc, format='.5f')
-            #     self.message.add('certified acc curv', curv_cert_acc, format='.5f')
-            #     self.message.add('certified acc lip imp', lip_cert_acc_imp, format='.5f')
-            #     print(self.message.get_message())
-            #     logging.info(self.message.get_message())
+            accuracy, cert_rad, lip_cert_rad, curv_cert_rad, grad_norm, margins, corrects = self.evaluate_certified_radius()
+            M = self.model.module.model.calculateCurvature().unsqueeze(0) * np.sqrt(2)
+            for eps in [36, 72, 108, 255]:
+                eps_float = eps / 255
+                lip_cst_imp = torch.minimum(grad_norm + M * eps_float, torch.ones_like(grad_norm) * np.sqrt(2.))
+                lip_cert_rad_imp = self.evaluate_certified_radius_lip(lip_cst_imp, margins) * corrects
+                cert_rad = torch.maximum(cert_rad, lip_cert_rad_imp)
+                #
+                cert_acc = (cert_rad > eps_float).sum() / cert_rad.shape[0]
+                lip_cert_acc = (lip_cert_rad > eps_float).sum() / lip_cert_rad.shape[0]
+                curv_cert_acc = (curv_cert_rad > eps_float).sum() / curv_cert_rad.shape[0]
+                lip_cert_acc_imp = (lip_cert_rad_imp > eps_float).sum() / lip_cert_rad_imp.shape[0]
+                #
+                self.message.add('eps', [eps, 255], format='.0f')
+                self.message.add('eps', eps_float, format='.5f')
+                self.message.add('accuracy', accuracy, format='.5f')
+                self.message.add('certified acc', cert_acc, format='.5f')
+                self.message.add('certified acc lip', lip_cert_acc, format='.5f')
+                self.message.add('certified acc curv', curv_cert_acc, format='.5f')
+                self.message.add('certified acc lip imp', lip_cert_acc_imp, format='.5f')
+                print(self.message.get_message())
+                logging.info(self.message.get_message())
 
 
 
@@ -240,7 +240,7 @@ class Evaluator:
         def grad_f(x):
             return torch.einsum('ij,ij->i', queryCoefficient, self.model(x))
 
-        print(inputs.shape, queryCoefficient.shape)
+        # print(inputs.shape, queryCoefficient.shape)
         grad = jacobian(grad_f, inputs).sum(dim=1).reshape(inputs.shape[0], -1)
         grad_norm = torch.linalg.norm(grad, 2, dim=1)
         if useQueryCoefficients:
