@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from core.bisectionSolver import createSlopeDictionary
 
 
 def normalize(input):
@@ -11,6 +12,28 @@ def normalize(input):
     while len(norm.shape) < len(input.shape):
         norm = norm.unsqueeze(-1)
     return input / norm
+
+
+class SlopeDictionary:
+    betaDictionary, betaPrimeDictionary, maximumValue = createSlopeDictionary()
+    maximumValue = torch.tensor(maximumValue)
+
+    @staticmethod
+    def readFromDictionary(dictionary, points):
+        xx = [round(y, 2) for y in torch.minimum(torch.abs(points), SlopeDictionary.maximumValue).flatten().tolist()]
+        slopes = []
+        for anchorPoint in xx:
+            slopes.append(dictionary[anchorPoint])
+        # print(anchorPoint, max(slopes))
+        return torch.tensor(slopes).reshape(points.shape).to(points.device)
+    @staticmethod
+    def getBeta(x):
+        return SlopeDictionary.readFromDictionary(SlopeDictionary.betaDictionary, x)
+
+    @staticmethod
+    def getBetaPrime(x):
+        return SlopeDictionary.readFromDictionary(SlopeDictionary.betaPrimeDictionary, x)
+
 
 
 class SDPBasedLipschitzConvLayer(nn.Module):
@@ -69,16 +92,30 @@ class SDPBasedLipschitzConvLayer(nn.Module):
 
         return out
 
-    def calculateElementLipschitzs(self):
+    def calculateElementLipschitzs(self, localPoints=None):
         T = self.computeT()[None, :, None, None]
 
         wForward = F.conv2d(self.wEigen, self.kernel, padding=1)
         wNorm = torch.linalg.norm(wForward.flatten(), 2)
-        wNorm2Inf = torch.max(torch.linalg.norm(self.kernel.flatten(1), 2, 1))
+        if localPoints is None:
+            activationWNorm2Inf =\
+                4 / np.sqrt(27) * torch.max(torch.linalg.norm(self.kernel.flatten(1), 2, 1))
+        else:
+            assert len(localPoints.shape) == 4
+            wPassed = F.conv2d(localPoints, self.kernel, bias=self.bias, padding=1)
+            betaPrimes = SlopeDictionary.getBetaPrime(wPassed)
+            betaPrimes = torch.max(betaPrimes.flatten(2), 2).values
+            # print(torch.max(betaPrimes, 1).values)
+            # raise
+            # raise
+            wRowNorm = torch.linalg.norm(self.kernel.flatten(1), 2, 1)
+            activationWNorm2Inf = torch.max(wRowNorm.unsqueeze(0) * betaPrimes, 1).values.unsqueeze(1)
+
+        # wNorm2Inf = torch.max(torch.linalg.norm(self.kernel.flatten(1), 2, 1))
 
         gForward = F.conv_transpose2d(-2 / T * self.gEigen, self.kernel, padding=1)
         gNorm = torch.linalg.norm(gForward.flatten(), 2)
-        return wNorm, gNorm, wNorm2Inf
+        return wNorm, gNorm, activationWNorm2Inf
 
 
 class SDPBasedLipschitzLinearLayer(nn.Module):
@@ -133,13 +170,16 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
             self.gEigen.data = normalize(gBackward)
         return out
 
-    def calculateElementLipschitzs(self):
+    def calculateElementLipschitzs(self, localPoint=None):
         T = self.computeT()
         wNorm = torch.linalg.norm((self.wEigen @ self.weights.T).flatten(), 2)
-        wNorm2Inf = torch.max(torch.linalg.norm(self.weights, 2, 1))
+        if localPoint is None:
+            activationWNorm2Inf = 4 / np.sqrt(27) * torch.max(torch.linalg.norm(self.weights, 2, 1))
+        else:
+            raise NotImplementedError
         gForward = (-2 / T * self.gEigen) @ self.weights
         gNorm = torch.linalg.norm(gForward.flatten(), 2)
-        return wNorm, gNorm, wNorm2Inf
+        return wNorm, gNorm, activationWNorm2Inf
 
 class PaddingChannels(nn.Module):
 

@@ -85,8 +85,9 @@ class Evaluator:
         if self.config.mode == "certified":
             # self.eval_certified_plot(eps=36/255)
 
-            accuracy, cert_rad, lip_cert_rad, curv_cert_rad, grad_norm, margins, corrects = self.evaluate_certified_radius()
-            M = self.model.module.model.calculateCurvature().unsqueeze(0) * np.sqrt(2)
+            accuracy, cert_rad, lip_cert_rad, curv_cert_rad, grad_norm, margins, corrects, M = self.evaluate_certified_radius()
+            # raise ValueError("is M ok?")
+            # M = self.model.module.model.calculateCurvature().unsqueeze(0)
             for eps in [36, 72, 108, 255]:
                 eps_float = eps / 255
                 lip_cst_imp = torch.minimum(grad_norm + M * eps_float, torch.ones_like(grad_norm) * np.sqrt(2.))
@@ -125,7 +126,7 @@ class Evaluator:
 
     @torch.no_grad()
     def evaluate_certified_radius_lip(self, lip_cst, margins):
-        lip_cert_rad = (margins[:, -1] - margins[:, -2]) / lip_cst
+        lip_cert_rad = (margins[:, -1:] - margins[:, -2:-1]) / lip_cst
         return lip_cert_rad
 
 
@@ -143,9 +144,11 @@ class Evaluator:
         for batch_n, data in tqdm(enumerate(data_loader), total=len(data_loader)):
             inputs, labels = data
             inputs, labels = inputs.cuda(), labels.cuda()
+
+
             outputs = self.model(inputs)
             predicted = outputs.argmax(axis=1)
-            correct = outputs.max(1)[1] == labels
+            correct = (outputs.max(1)[1] == labels).unsqueeze(1)
             corrects.append(correct)
             margins, index = torch.sort(outputs, 1)
 
@@ -159,21 +162,26 @@ class Evaluator:
             else:
                 activ = self.model.model.stable_block[0].activation
             if isinstance(activ, nn.Tanh):
-                tmp, grad_norm, M = self.secondOrderCert(inputs, margins, index)
+                tmp, grad_norm, M, allActiveCurvatures = self.secondOrderCert(inputs, margins, index)
                 Ms.append(M); grad_norms.append(grad_norm); marginss.append(margins)
                 curv_cert_rad.append(tmp * correct)
-                
+            # normalizedInputs = self.model.module.normalize(inputs)
+            # if isinstance(self.model, nn.DataParallel):
+            #     activ = self.model.module.model.updateLipschitz(normalizedInputs, 0.14, allActiveCurvatures)
+            # else:
+            #     activ = self.model.model.updateLipschitz(normalizedInputs, 0.14, allActiveCurvatures)
+            # raise
             running_accuracy += predicted.eq(labels.data).cpu().sum().numpy()
             running_inputs += inputs.size(0)
 
         self.model.train()
         accuracy = running_accuracy / running_inputs
-        curv_cert_rad = torch.hstack(curv_cert_rad)
-        lip_cert_rad = torch.hstack(lip_cert_rad)
-        margins = torch.vstack(marginss); grad_norm = torch.hstack(grad_norms); M = torch.hstack(Ms)
+        curv_cert_rad = torch.vstack(curv_cert_rad)
+        lip_cert_rad = torch.vstack(lip_cert_rad)
+        margins = torch.vstack(marginss); grad_norm = torch.vstack(grad_norms); M = torch.vstack(Ms)
         cert_rad = torch.maximum(curv_cert_rad, lip_cert_rad)
-        corrects = torch.hstack(corrects)
-        return accuracy, cert_rad, lip_cert_rad, curv_cert_rad, grad_norm, margins, corrects
+        corrects = torch.vstack(corrects)
+        return accuracy, cert_rad, lip_cert_rad, curv_cert_rad, grad_norm, margins, corrects, M
 
     # @torch.no_grad()
     # def eval_certified(self, eps):
@@ -242,20 +250,24 @@ class Evaluator:
 
         # print(inputs.shape, queryCoefficient.shape)
         grad = jacobian(grad_f, inputs).sum(dim=1).reshape(inputs.shape[0], -1)
-        grad_norm = torch.linalg.norm(grad, 2, dim=1)
+        grad_norm = torch.linalg.norm(grad, 2, dim=1, keepdim=True)
+        normalizedInputs = self.model.module.normalize(inputs)  # We make the assumption that the normalization only
+        # shifts the mean and does not alter the variance.
         if useQueryCoefficients:
-            M = self.model.module.model.calculateCurvature(queryCoefficient).unsqueeze(0)
+            M, allActiveCurvatures =\
+                self.model.module.model.calculateCurvature(queryCoefficient, localPoints=normalizedInputs,
+                                                           returnAll=True)
         else:
-            M = self.model.module.model.calculateCurvature().unsqueeze(0)
-            M *= np.sqrt(2)
-
+            M, allActiveCurvatures =\
+                self.model.module.model.calculateCurvature(localPoints=normalizedInputs, returnAll=True)
         if True:
-            diff = margins[:, -2] - margins[:, -1]
+            diff = margins[:, -2:-1] - margins[:, -1:]
             cert_rad = (-grad_norm + torch.sqrt(grad_norm**2 - 2 * M * diff)) / M
         else:
+            assert M.numel() == 1  # M shouldn't be local
             cert_rad = newton_step_cert(inputs, index[:, -1], index[:, -2], self.model, M, queryCoefficient)
 
-        return cert_rad, grad_norm, M
+        return cert_rad, grad_norm, M, allActiveCurvatures
 
 
     @torch.no_grad()
@@ -352,7 +364,7 @@ class Evaluator:
             else:
                 activ = self.model.model.stable_block[0].activation
             if isinstance(activ, nn.Tanh):
-                tmp_radius, __, __ = self.secondOrderCert(inputs, margins, index, eps_float)
+                tmp_radius, __, __, _ = self.secondOrderCert(inputs, margins, index, eps_float)
                 radiusDistCurv.append((tmp_radius * correct).cpu().numpy() )
             
             
