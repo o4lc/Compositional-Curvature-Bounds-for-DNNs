@@ -96,8 +96,8 @@ class LipschitzNetwork(nn.Module):
 
         for layer in self.layers_linear:
             if isinstance(layer, SDPBasedLipschitzLinearLayer):
-                wNorm, gNorm, wNorm2Inf = layer.calculateElementLipschitzs()
-                layerJacobianLipschitz = 4 / np.sqrt(27) * wNorm * wNorm2Inf * gNorm
+                wNorm, gNorm, activationWNorm2Inf = layer.calculateElementLipschitzs()
+                layerJacobianLipschitz = wNorm * activationWNorm2Inf * gNorm
                 # layerJacobianLipschitz = 4 / np.sqrt(27) * wNorm ** 2 * gNorm
                 curvatureTillHere = layerJacobianLipschitz * lip ** 2 + lip * curvatureTillHere
                 allActiveCurvatures.append(curvatureTillHere)
