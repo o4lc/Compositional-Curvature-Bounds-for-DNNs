@@ -253,13 +253,19 @@ class Evaluator:
         grad_norm = torch.linalg.norm(grad, 2, dim=1, keepdim=True)
         normalizedInputs = self.model.module.normalize(inputs)  # We make the assumption that the normalization only
         # shifts the mean and does not alter the variance.
+        anchorDerivativeTerm = False
+        returnAll = True
         if useQueryCoefficients:
             M, allActiveCurvatures =\
-                self.model.module.model.calculateCurvature(queryCoefficient, localPoints=normalizedInputs,
-                                                           returnAll=True)
+                self.model.module.model.calculateCurvature(queryCoefficient,
+                                                           localPoints=normalizedInputs,
+                                                           returnAll=returnAll,
+                                                           anchorDerivativeTerm=anchorDerivativeTerm)
         else:
             M, allActiveCurvatures =\
-                self.model.module.model.calculateCurvature(localPoints=normalizedInputs, returnAll=True)
+                self.model.module.model.calculateCurvature(localPoints=normalizedInputs,
+                                                           returnAll=returnAll,
+                                                           anchorDerivativeTerm=anchorDerivativeTerm)
         if True:
             diff = margins[:, -2:-1] - margins[:, -1:]
             cert_rad = (-grad_norm + torch.sqrt(grad_norm**2 - 2 * M * diff)) / M

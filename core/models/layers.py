@@ -170,13 +170,20 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
             self.gEigen.data = normalize(gBackward)
         return out
 
-    def calculateElementLipschitzs(self, localPoint=None):
+    def calculateElementLipschitzs(self, localPoints=None):
         T = self.computeT()
         wNorm = torch.linalg.norm((self.wEigen @ self.weights.T).flatten(), 2)
-        if localPoint is None:
+        if localPoints is None:
             activationWNorm2Inf = 4 / np.sqrt(27) * torch.max(torch.linalg.norm(self.weights, 2, 1))
         else:
-            raise NotImplementedError
+            assert len(localPoints.shape) == 2
+            wPassed = F.linear(localPoints, self.weights, self.bias)
+            betaPrimes = SlopeDictionary.getBetaPrime(wPassed)
+
+            wRowNorm = torch.linalg.norm(self.weights, 2, 1)
+            activationWNorm2Inf = torch.max(wRowNorm.unsqueeze(0) * betaPrimes, 1).values.unsqueeze(1)
+
+
         gForward = (-2 / T * self.gEigen) @ self.weights
         gNorm = torch.linalg.norm(gForward.flatten(), 2)
         return wNorm, gNorm, activationWNorm2Inf

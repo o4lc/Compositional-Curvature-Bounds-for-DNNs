@@ -7,7 +7,8 @@ from core.models.layers import LinearNormalized, PoolingLinear, PaddingChannels
 from core.models.layers import SDPBasedLipschitzConvLayer, SDPBasedLipschitzLinearLayer
 import numpy as np
 from torch.autograd.functional import jacobian
-
+from time import time
+from tqdm import tqdm
 
 class NormalizedModel(nn.Module):
 
@@ -77,29 +78,61 @@ class LipschitzNetwork(nn.Module):
     def forward(self, x):
         return self.last_last(self.base(x))
 
-    def calculateCurvature(self, queryCoefficient=None, localPoints=None, returnAll=False):
+    def calculateCurvature(self, queryCoefficient=None, localPoints=None, returnAll=False, anchorDerivativeTerm=False):
         if localPoints is not None:
+            originalInputs = localPoints.clone()
             localPoints = self.conv1(localPoints)
         allActiveCurvatures = []
         curvatureTillHere = 0
         lip = 1.
-        for layer in self.stable_block:
+        for layerCount, layer in enumerate(self.stable_block):
             if isinstance(layer, SDPBasedLipschitzConvLayer):
                 wNorm, gNorm, activationWNorm2Inf = layer.calculateElementLipschitzs(localPoints=localPoints)
                 layerJacobianLipschitz = wNorm * gNorm * activationWNorm2Inf
 
                 # layerJacobianLipschitz = 4 / np.sqrt(27) * wNorm ** 2 * gNorm
-                curvatureTillHere = layerJacobianLipschitz * lip ** 2 + lip * curvatureTillHere
+                if anchorDerivativeTerm and localPoints is not None:
+                    pass
+                    localLip = lip
+                else:
+                    localLip = lip
+                curvatureTillHere = layerJacobianLipschitz * lip * localLip + lip * curvatureTillHere
                 allActiveCurvatures.append(curvatureTillHere)
             if localPoints is not None:
                 localPoints = layer(localPoints)
 
-        for layer in self.layers_linear:
+        for layerCount, layer in enumerate(self.layers_linear):
             if isinstance(layer, SDPBasedLipschitzLinearLayer):
-                wNorm, gNorm, activationWNorm2Inf = layer.calculateElementLipschitzs()
+                wNorm, gNorm, activationWNorm2Inf = layer.calculateElementLipschitzs(localPoints=localPoints)
                 layerJacobianLipschitz = wNorm * activationWNorm2Inf * gNorm
                 # layerJacobianLipschitz = 4 / np.sqrt(27) * wNorm ** 2 * gNorm
-                curvatureTillHere = layerJacobianLipschitz * lip ** 2 + lip * curvatureTillHere
+                if anchorDerivativeTerm and localPoints is not None and layerCount == self.depth_linear:
+
+                    # derivatives = jacobian(
+                    #     lambda x: self.layers_linear[:layerCount + 1](self.stable_block(self.conv1(x))).sum(0),
+                    #     originalInputs, create_graph=False).permute(1, 0, 2, 3, 4).flatten(2)
+
+                    # The following implementation uses the fact that the Lipschitz constant is 1.
+                    localLip = []
+                    miniBatchSize = 32
+                    for i in tqdm(range(0, localPoints.shape[0], miniBatchSize)):
+                    # for i in range(0, localPoints.shape[0], miniBatchSize):
+                        derivatives = jacobian(
+                            lambda x: self.layers_linear[:layerCount + 1](self.stable_block(self.conv1(x))).sum(0),
+                            originalInputs[i:i + miniBatchSize], create_graph=False).permute(1, 0, 2, 3, 4).flatten(2)
+
+                        # derivatives = jacobian(lambda x: layer(x).sum(0), localPoints[i:i + miniBatchSize],
+                        #                        create_graph=False).permute(1, 0, 2)
+
+                        localLip.append(torch.linalg.norm(derivatives, 2, dim=(1, 2)).unsqueeze(1))
+                    localLip = torch.vstack(localLip)
+                    print(localLip)
+                    # derivatives = jacobian(lambda x: layer(x).sum(0), localPoints, create_graph=False).permute(1, 0, 2)
+                    # localLip = torch.linalg.norm(derivatives, 2, dim=(1, 2)).unsqueeze(1)
+                else:
+                    localLip = lip
+
+                curvatureTillHere = layerJacobianLipschitz * lip * localLip + lip * curvatureTillHere
                 allActiveCurvatures.append(curvatureTillHere)
             if localPoints is not None:
                 localPoints = layer(localPoints)
@@ -113,6 +146,7 @@ class LipschitzNetwork(nn.Module):
                 weight = np.sqrt(2) * weight
             curvatureTillHere = torch.linalg.norm(weight, 2, dim=dims) * curvatureTillHere
         elif isinstance(self.last_last, PoolingLinear):
+            curvatureTillHere = np.sqrt(2) * curvatureTillHere
             pass
         else:
             raise NotImplementedError
