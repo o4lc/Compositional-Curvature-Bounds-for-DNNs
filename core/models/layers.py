@@ -25,7 +25,7 @@ class SlopeDictionary:
         for anchorPoint in xx:
             slopes.append(dictionary[anchorPoint])
         # print(anchorPoint, max(slopes))
-        return torch.tensor(slopes).reshape(points.shape).to(points.device)
+        return torch.tensor(slopes).reshape(points.shape).to(points.device).to(points.dtype)
     @staticmethod
     def getBeta(x):
         return SlopeDictionary.readFromDictionary(SlopeDictionary.betaDictionary, x)
@@ -217,21 +217,30 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
             layerJacobianLipschitz = wNorm * activationWNorm2Inf * gNorm
         elif method == 2:
             if localPoints is None:
-                activationWNorm2Inf = 4 / np.sqrt(27) * torch.max(torch.linalg.norm(self.weights, 2, 1))
+                wForward = self.wEigen @ self.weights.T
+                activationWNorm = 4 / np.sqrt(27) * torch.linalg.norm(wForward.flatten(), 2, )
             else:
                 assert len(localPoints.shape) == 2
+
                 wPassed = F.linear(localPoints, self.weights, self.bias)
                 betaPrimes = SlopeDictionary.getBetaPrime(wPassed)
 
-                wRowNorm = torch.linalg.norm(self.weights, 2, 1)
-                activationWNorm2Inf = torch.max(wRowNorm.unsqueeze(0) * betaPrimes, 1).values.unsqueeze(1)
+                # perform a few power iterations just to converge to local answer
+                eigenVector = self.wEigen.data
+                with torch.no_grad():
+                    for _ in range(2):
+                        wForward = betaPrimes * (eigenVector @ self.weights.T)
+                        wBackward = (betaPrimes * wForward) @ self.weights
+                        eigenVector = normalize(wBackward)
+                wForward = betaPrimes * (eigenVector @ self.weights.T)
+                activationWNorm = torch.linalg.norm(wForward.flatten(), 2)
             T = self.computeT()
             neg2TInv = -2 / T
             aForward = torch.einsum("bl,l,li,lj->bij",
                          self.aEigen, neg2TInv, self.weights, self.weights)
 
             aNorm = torch.linalg.norm(aForward.flatten(), 2)
-            layerJacobianLipschitz = aNorm * activationWNorm2Inf
+            layerJacobianLipschitz = aNorm * activationWNorm
 
         # wNorm, gNorm, activationWNorm2Inf = self.calculateElementLipschitzs(localPoints=localPoints)
         # layerJacobianLipschitz2 = wNorm * activationWNorm2Inf * gNorm
