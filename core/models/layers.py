@@ -231,10 +231,10 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
                          self.aEigen, neg2TInv, self.weights, self.weights)
 
             aNorm = torch.linalg.norm(aForward.flatten(), 2)
-            layerJacobianLipschitz = 4 / np.sqrt(27) * aNorm * activationWNorm2Inf
+            layerJacobianLipschitz = aNorm * activationWNorm2Inf
 
-        wNorm, gNorm, activationWNorm2Inf = self.calculateElementLipschitzs(localPoints=localPoints)
-        layerJacobianLipschitz2 = wNorm * activationWNorm2Inf * gNorm
+        # wNorm, gNorm, activationWNorm2Inf = self.calculateElementLipschitzs(localPoints=localPoints)
+        # layerJacobianLipschitz2 = wNorm * activationWNorm2Inf * gNorm
         # print(torch.mean(layerJacobianLipschitz), torch.mean(layerJacobianLipschitz2),
         #       torch.mean(layerJacobianLipschitz / layerJacobianLipschitz2))
 
