@@ -74,6 +74,7 @@ if __name__ == '__main__':
   parser.add_argument("--hessianRegularizerMinimumCoefficient", type=float,
                       help="Minimum regularizer coefficient for the primal dual of the hessian regularizer",
                       default=0.0001)
+  parser.add_argument("--accuracyEmaFactor", type=float, default=0.001)
 
 
   # specific parameters for eval

@@ -43,7 +43,7 @@ class Trainer:
         self.pdEpsilon = config.hessianRegularizerPrimalDualEpsilon
         self.minimumRegularizerCoefficient = config.hessianRegularizerMinimumCoefficient
         self.accuracyMovingAverage = 0
-        self.movingAverageFactor = 0.1
+        self.movingAverageFactor = config.accuracyEmaFactor
 
 
     def _load_state(self):

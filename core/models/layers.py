@@ -79,18 +79,23 @@ class SDPBasedLipschitzConvLayer(nn.Module):
         res = F.conv2d(x, self.kernel, bias=self.bias, padding=1)
         res = self.activation(res)
         T = self.computeT()[None, :, None, None]
-        res = - 2 / T * res
+        neg2TInv = -2 / T
+        res = neg2TInv * res
         res = F.conv_transpose2d(res, self.kernel, padding=1)
         out = x + res
 
         with torch.no_grad():
-            self.wEigen.data = \
-              normalize(F.conv_transpose2d(F.conv2d(self.wEigen, self.kernel, padding=1), self.kernel, padding=1))
-            self.gEigen.data = \
-              normalize(-2 / T * F.conv2d(F.conv_transpose2d(
-                -2 / T * self.gEigen, self.kernel, padding=1), self.kernel, padding=1))
+            self.powerIterate(neg2TInv)
 
         return out
+
+    def powerIterate(self, neg2TInv):
+        self.wEigen.data = \
+            normalize(F.conv_transpose2d(F.conv2d(self.wEigen, self.kernel, padding=1), self.kernel, padding=1))
+        self.gEigen.data = \
+            normalize(neg2TInv * F.conv2d(F.conv_transpose2d(
+                neg2TInv * self.gEigen, self.kernel, padding=1), self.kernel, padding=1))
+
 
     def calculateElementLipschitzs(self, localPoints=None):
         T = self.computeT()[None, :, None, None]
@@ -117,6 +122,11 @@ class SDPBasedLipschitzConvLayer(nn.Module):
         gNorm = torch.linalg.norm(gForward.flatten(), 2)
         return wNorm, gNorm, activationWNorm2Inf
 
+    def calculateCurvature(self, localPoints=None):
+        wNorm, gNorm, activationWNorm2Inf = self.calculateElementLipschitzs(localPoints=localPoints)
+        layerJacobianLipschitz = wNorm * gNorm * activationWNorm2Inf
+        return layerJacobianLipschitz
+
 
 class SDPBasedLipschitzLinearLayer(nn.Module):
 
@@ -140,6 +150,8 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
         self.gEigen = \
             nn.Parameter(normalize(torch.randn(1, cout)), requires_grad=False)
         self.wEigen = nn.Parameter(normalize(torch.randn((1, cin))), requires_grad=False)
+        self.aEigen = nn.Parameter(normalize(torch.randn((1, cout))), requires_grad=False)
+        # self.aEigen = normalize(torch.randn((1, cout))).to(torch.device("cuda:0"))
 
     def computeT(self):
         method = "abs"  # "abs", "exp
@@ -158,17 +170,26 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
         res = F.linear(x, self.weights, self.bias)
         res = self.activation(res)
         T = self.computeT()
-        res = -2 / T * res
+        neg2TInv = -2 / T
+        res = neg2TInv * res
         res = F.linear(res, self.weights.t())
         out = x + res
 
         # updating eigenVectors
         with torch.no_grad():
-            self.wEigen.data = normalize(self.wEigen @ self.weights.T @ self.weights)
-            gForward = (-2 / T * self.gEigen) @ self.weights
-            gBackward = -2 / T * (gForward @ self.weights.T)
-            self.gEigen.data = normalize(gBackward)
+            self.powerIterate(neg2TInv)
         return out
+
+    def powerIterate(self, neg2TInv):
+        self.wEigen.data = normalize(self.wEigen @ self.weights.T @ self.weights)
+        gForward = (neg2TInv * self.gEigen) @ self.weights
+        gBackward = neg2TInv * (gForward @ self.weights.T)
+        self.gEigen.data = normalize(gBackward)
+
+        aForward = torch.einsum("bl,l,li,lj->bij",
+                                self.aEigen, neg2TInv, self.weights, self.weights)
+        aBackward = torch.einsum("bij, ni, nj, n->bn", aForward, self.weights, self.weights, neg2TInv)
+        self.aEigen.data = normalize(aBackward)
 
     def calculateElementLipschitzs(self, localPoints=None):
         T = self.computeT()
@@ -187,6 +208,39 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
         gForward = (-2 / T * self.gEigen) @ self.weights
         gNorm = torch.linalg.norm(gForward.flatten(), 2)
         return wNorm, gNorm, activationWNorm2Inf
+
+    def calculateCurvature(self, localPoints=None):
+        method = 2
+
+        if method == 1:
+            wNorm, gNorm, activationWNorm2Inf = self.calculateElementLipschitzs(localPoints=localPoints)
+            layerJacobianLipschitz = wNorm * activationWNorm2Inf * gNorm
+        elif method == 2:
+            if localPoints is None:
+                activationWNorm2Inf = 4 / np.sqrt(27) * torch.max(torch.linalg.norm(self.weights, 2, 1))
+            else:
+                assert len(localPoints.shape) == 2
+                wPassed = F.linear(localPoints, self.weights, self.bias)
+                betaPrimes = SlopeDictionary.getBetaPrime(wPassed)
+
+                wRowNorm = torch.linalg.norm(self.weights, 2, 1)
+                activationWNorm2Inf = torch.max(wRowNorm.unsqueeze(0) * betaPrimes, 1).values.unsqueeze(1)
+            T = self.computeT()
+            neg2TInv = -2 / T
+            aForward = torch.einsum("bl,l,li,lj->bij",
+                         self.aEigen, neg2TInv, self.weights, self.weights)
+
+            aNorm = torch.linalg.norm(aForward.flatten(), 2)
+            layerJacobianLipschitz = 4 / np.sqrt(27) * aNorm * activationWNorm2Inf
+
+        wNorm, gNorm, activationWNorm2Inf = self.calculateElementLipschitzs(localPoints=localPoints)
+        layerJacobianLipschitz2 = wNorm * activationWNorm2Inf * gNorm
+        # print(torch.mean(layerJacobianLipschitz), torch.mean(layerJacobianLipschitz2),
+        #       torch.mean(layerJacobianLipschitz / layerJacobianLipschitz2))
+
+        return layerJacobianLipschitz
+
+
 
 class PaddingChannels(nn.Module):
 

@@ -87,8 +87,7 @@ class LipschitzNetwork(nn.Module):
         lip = 1.
         for layerCount, layer in enumerate(self.stable_block):
             if isinstance(layer, SDPBasedLipschitzConvLayer):
-                wNorm, gNorm, activationWNorm2Inf = layer.calculateElementLipschitzs(localPoints=localPoints)
-                layerJacobianLipschitz = wNorm * gNorm * activationWNorm2Inf
+                layerJacobianLipschitz = layer.calculateCurvature(localPoints=localPoints)
 
                 # layerJacobianLipschitz = 4 / np.sqrt(27) * wNorm ** 2 * gNorm
                 if anchorDerivativeTerm and localPoints is not None:
@@ -103,8 +102,10 @@ class LipschitzNetwork(nn.Module):
 
         for layerCount, layer in enumerate(self.layers_linear):
             if isinstance(layer, SDPBasedLipschitzLinearLayer):
-                wNorm, gNorm, activationWNorm2Inf = layer.calculateElementLipschitzs(localPoints=localPoints)
-                layerJacobianLipschitz = wNorm * activationWNorm2Inf * gNorm
+                # print("performing 100 power iterations")
+                # for _ in range(100):
+                #     layer.powerIterate(-2 / layer.computeT())
+                layerJacobianLipschitz = layer.calculateCurvature(localPoints=localPoints)
                 # layerJacobianLipschitz = 4 / np.sqrt(27) * wNorm ** 2 * gNorm
                 if anchorDerivativeTerm and localPoints is not None and layerCount == self.depth_linear:
 
