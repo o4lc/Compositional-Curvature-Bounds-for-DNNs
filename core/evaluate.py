@@ -88,6 +88,13 @@ class Evaluator:
             epss = [36, 72, 108, 255]
             if self.config.dataset == 'mnist':
                 epss = [403]
+
+            if self.config.newtonStep:
+                curv_cert_rad_tmp = self.newton_cert_rad(M).unsqueeze(1)
+                curv_cert_rad = torch.maximum(curv_cert_rad, curv_cert_rad_tmp)
+                cert_rad = torch.maximum(cert_rad, curv_cert_rad)
+                
+
             for eps in epss:
                 eps_float = eps / 255
                 lip_cst_imp = torch.minimum(grad_norm + M * eps_float, torch.ones_like(grad_norm) * np.sqrt(2.))
@@ -353,6 +360,25 @@ class Evaluator:
         # self.message.add('Accuracy attack', accuracy_adv, format='.5f')
         # logging.info(self.message.get_message())
 
+    def newton_cert_rad(self, M):
+        self.model.eval()
+        radiusDistCurv = []
+
+        data_loader, _ = self.reader.load_dataset()
+
+        print("evaluating certified accuracy")
+        for batch_n, data in tqdm(enumerate(data_loader), total=len(data_loader)):
+            inputs, labels = data
+            inputs, labels = inputs.cuda(), labels.cuda()
+            outputs = self.model(inputs)
+            correct = outputs.max(1)[1] == labels
+            margins, index = torch.sort(outputs, 1)
+            tmpRad = newton_step_cert(inputs, index[:, -1], index[:, -2], \
+                                              self.model, M[batch_n*inputs.shape[0]:(batch_n+1)*inputs.shape[0]])
+            radiusDistCurv.append((tmpRad * correct))
+        radiusDistCurv = torch.hstack(radiusDistCurv)
+        return radiusDistCurv
+
     
     @torch.no_grad()
     def eval_certified_plot(self, eps):
@@ -526,23 +552,30 @@ def evaluate_madry(loader, model, epsilon, verbose, device=torch.device("cuda"),
     return perrors.avg
 
 
-def newton_step_cert(x0, true_label, false_target, model, M, queryCoefficient, verbose=True):
+
+
+def newton_step_cert(x0, true_label, false_target, model, M, verbose=True):
+        queryCoefficient = torch.zeros(x0.shape[0], model.module.model.n_classes).cuda()
+        queryCoefficient[torch.arange(x0.shape[0]), true_label] += 1
+        queryCoefficient[torch.arange(x0.shape[0]), false_target] += -1
         def grad_f(x):
-            return torch.einsum('ij,ij->i', queryCoefficient, model(x))
+            return torch.einsum('ij,ij->i', queryCoefficient, model(x)).sum()
 
         batch_size = x0.shape[0]
 
+        M = M.unsqueeze(2).unsqueeze(3)
         eta = torch.zeros((batch_size, 1)).cuda()
         eta_min = -1/M*torch.ones((batch_size, 1, 1, 1)).cuda()
         eta_max =  1/M*torch.ones((batch_size, 1, 1, 1)).cuda()
         eta = (eta_min + eta_max)/2.
+        
 
         x = x0.clone()
-        outer_iters = 10
-        inner_iters = 10
+        outer_iters = 20
+        inner_iters = 20
         for i in range(outer_iters):
             for j in range(inner_iters):
-                g_batch = jacobian(grad_f, x).sum(dim=1)
+                g_batch = jacobian(grad_f, x).reshape(x0.shape)
                 dual_grad = eta*g_batch - eta*M*x - x0
                 dual_hess = 1 + eta*M
                 x = -torch.reciprocal(dual_hess)*dual_grad
@@ -560,7 +593,7 @@ def newton_step_cert(x0, true_label, false_target, model, M, queryCoefficient, v
         lower_bound = torch.sqrt((dist_sqrd>0).float()*dist_sqrd)
         grad_norm = torch.norm((eta*g_batch + (x - x0)).flatten(1), 2, dim=1)
 
-        return lower_bound *(grad_norm < 1e-5)
+        return lower_bound * (grad_norm < 1e-5)
 
 
 # def gradient_x(x, model, true_label, false_target):
