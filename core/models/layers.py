@@ -221,7 +221,6 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
                 activationWNorm = 4 / np.sqrt(27) * torch.linalg.norm(wForward.flatten(), 2, )
             else:
                 assert len(localPoints.shape) == 2
-
                 wPassed = F.linear(localPoints, self.weights, self.bias)
                 betaPrimes = SlopeDictionary.getBetaPrime(wPassed)
 
@@ -232,8 +231,9 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
                         wForward = betaPrimes * (eigenVector @ self.weights.T)
                         wBackward = (betaPrimes * wForward) @ self.weights
                         eigenVector = normalize(wBackward)
+
                 wForward = betaPrimes * (eigenVector @ self.weights.T)
-                activationWNorm = torch.linalg.norm(wForward.flatten(), 2)
+                activationWNorm = torch.linalg.norm(wForward.flatten(1), 2, 1, keepdim=True)
             T = self.computeT()
             neg2TInv = -2 / T
             aForward = torch.einsum("bl,l,li,lj->bij",
@@ -242,10 +242,10 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
             aNorm = torch.linalg.norm(aForward.flatten(), 2)
             layerJacobianLipschitz = aNorm * activationWNorm
 
-        # wNorm, gNorm, activationWNorm2Inf = self.calculateElementLipschitzs(localPoints=localPoints)
-        # layerJacobianLipschitz2 = wNorm * activationWNorm2Inf * gNorm
-        # print(torch.mean(layerJacobianLipschitz), torch.mean(layerJacobianLipschitz2),
-        #       torch.mean(layerJacobianLipschitz / layerJacobianLipschitz2))
+        wNorm, gNorm, activationWNorm2Inf = self.calculateElementLipschitzs(localPoints=localPoints)
+        layerJacobianLipschitz2 = wNorm * activationWNorm2Inf * gNorm
+        print(torch.mean(layerJacobianLipschitz), torch.mean(layerJacobianLipschitz2),
+              torch.mean(layerJacobianLipschitz / layerJacobianLipschitz2))
 
         return layerJacobianLipschitz
 

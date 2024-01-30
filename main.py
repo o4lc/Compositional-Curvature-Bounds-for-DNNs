@@ -114,6 +114,9 @@ if __name__ == '__main__':
     config = override_args(config, 70, 120, 15, 2048)
   elif config.model_name == 'xsmall':
     config = override_args(config, 3, 15, 1, 1024)
+  elif config.model_name == 'xxsmall':
+    config = override_args(config, 1, 5, 2, 100)
+
   elif config.model_name is None and \
       not all([config.depth, config.num_channels, config.depth_linear, config.n_features]):
     ValueError("Choose --model-name 'small' 'medium' 'large' 'xlarge'")

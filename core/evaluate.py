@@ -84,21 +84,21 @@ class Evaluator:
         self.load_ckpt()
         if self.config.mode == "certified":
             # self.eval_certified_plot(eps=36/255)
-
             accuracy, cert_rad, lip_cert_rad, curv_cert_rad, grad_norm, margins, corrects, M = self.evaluate_certified_radius()
-            # raise ValueError("is M ok?")
-            # M = self.model.module.model.calculateCurvature().unsqueeze(0)
+
             for eps in [36, 72, 108, 255]:
                 eps_float = eps / 255
                 lip_cst_imp = torch.minimum(grad_norm + M * eps_float, torch.ones_like(grad_norm) * np.sqrt(2.))
                 lip_cert_rad_imp = self.evaluate_certified_radius_lip(lip_cst_imp, margins) * corrects
-                cert_rad = torch.maximum(cert_rad, lip_cert_rad_imp)
+
+                cert_rad_eps = torch.maximum(cert_rad, lip_cert_rad_imp)
                 #
-                cert_acc = (cert_rad > eps_float).sum() / cert_rad.shape[0]
+
+                cert_acc = (cert_rad_eps > eps_float).sum() / cert_rad.shape[0]
                 lip_cert_acc = (lip_cert_rad > eps_float).sum() / lip_cert_rad.shape[0]
                 curv_cert_acc = (curv_cert_rad > eps_float).sum() / curv_cert_rad.shape[0]
                 lip_cert_acc_imp = (lip_cert_rad_imp > eps_float).sum() / lip_cert_rad_imp.shape[0]
-                #
+
                 self.message.add('eps', [eps, 255], format='.0f')
                 self.message.add('eps', eps_float, format='.5f')
                 self.message.add('accuracy', accuracy, format='.5f')
@@ -108,6 +108,9 @@ class Evaluator:
                 self.message.add('certified acc lip imp', lip_cert_acc_imp, format='.5f')
                 print(self.message.get_message())
                 logging.info(self.message.get_message())
+
+                assert lip_cert_acc_imp >= lip_cert_acc
+                assert lip_cert_acc_imp + curv_cert_acc >= cert_acc
 
 
 
