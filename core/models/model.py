@@ -207,3 +207,10 @@ class LipschitzNetwork(nn.Module):
         print(derivativeNorms)
         # If you want to update the linear layers, remember that AveragePooling has affected the "count" variable.
         pass
+
+    def calcParams(self):
+        sum = 0
+        for parameter in self.parameters():
+            if parameter.requires_grad:
+                sum += parameter.shape.numel()
+        return sum
