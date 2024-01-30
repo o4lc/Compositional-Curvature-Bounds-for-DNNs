@@ -85,8 +85,10 @@ class Evaluator:
         if self.config.mode == "certified":
             # self.eval_certified_plot(eps=36/255)
             accuracy, cert_rad, lip_cert_rad, curv_cert_rad, grad_norm, margins, corrects, M = self.evaluate_certified_radius()
-
-            for eps in [36, 72, 108, 255]:
+            epss = [36, 72, 108, 255]
+            if self.config.dataset == 'mnist':
+                epss = [403]
+            for eps in epss:
                 eps_float = eps / 255
                 lip_cst_imp = torch.minimum(grad_norm + M * eps_float, torch.ones_like(grad_norm) * np.sqrt(2.))
                 lip_cert_rad_imp = self.evaluate_certified_radius_lip(lip_cst_imp, margins) * corrects
