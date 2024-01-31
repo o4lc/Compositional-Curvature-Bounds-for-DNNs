@@ -64,6 +64,7 @@ if __name__ == '__main__':
 
   parser.add_argument("--activation", type=str, default='relu', choices=['relu', 'tanh'])
   parser.add_argument("--penalizeCurvature", action='store_true')
+  parser.add_argument("--boundCurvature", action='store_true')
 
   parser.add_argument("--hessianRegularizerCoefficient", type=float,
                       help="Coefficient for the hessian regularizer", default=1)

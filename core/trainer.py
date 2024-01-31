@@ -292,10 +292,11 @@ class Trainer:
         loss = self.criterion(outputs, labels)
         wandb.log({"xent loss": loss.item(),
                    "lr": self.optimizer.param_groups[0]['lr']})
-        if self.config.penalizeCurvature:
-            modelCurvature = self.model.module.model.calculateCurvature()
 
-            accuracy = (torch.sum(torch.argmax(outputs, 1) == labels) / labels.shape[0]).item()
+        modelCurvature = self.model.module.model.calculateCurvature()
+        accuracy = (torch.sum(torch.argmax(outputs, 1) == labels) / labels.shape[0]).item()
+        wandb.log({"Curvature Bound": modelCurvature.item(), "accuracy": accuracy,})
+        if self.config.penalizeCurvature:
             self.accuracyMovingAverage = (self.movingAverageFactor * accuracy +
                                           (1 - self.movingAverageFactor) * self.accuracyMovingAverage)
             self.regularizerCoefficient = (
@@ -304,12 +305,17 @@ class Trainer:
                     self.minimumRegularizerCoefficient))
             loss += self.regularizerCoefficient * modelCurvature
 
-            wandb.log({"Curvature Bound": modelCurvature.item(),
-                       "Regularizer Coefficient": self.regularizerCoefficient,
+            wandb.log({"Regularizer Coefficient": self.regularizerCoefficient,
                        "moving average accuracy": self.accuracyMovingAverage,
-                       "accuracy": accuracy,
                        "total loss": loss.item(),})
-
+        elif self.config.boundCurvature:
+            self.regularizerCoefficient = (
+                max(self.regularizerCoefficient +
+                    (modelCurvature.item() - self.pdEpsilon) * self.regularizerStepSize,
+                    self.minimumRegularizerCoefficient))
+            loss += self.regularizerCoefficient * modelCurvature
+            wandb.log({"Regularizer Coefficient": self.regularizerCoefficient,
+                       "total loss": loss.item(), })
         loss.backward()
         self.process_gradients(step)
         self.optimizer.step()
