@@ -90,6 +90,9 @@ class Evaluator:
                 epss = [403]
 
             if self.config.newtonStep:
+                M = self.model.module.model.calculateCurvature().unsqueeze(0).unsqueeze(0)
+                data_loader, _ = self.reader.load_dataset()
+                M = M.repeat(data_loader.dataset.__len__(), 1)
                 curv_cert_rad_tmp = self.newton_cert_rad(M).unsqueeze(1)
                 curv_cert_rad = torch.maximum(curv_cert_rad, curv_cert_rad_tmp)
                 cert_rad = torch.maximum(cert_rad, curv_cert_rad)
@@ -563,7 +566,10 @@ def newton_step_cert(x0, true_label, false_target, model, M, verbose=True):
 
         batch_size = x0.shape[0]
 
-        M = M.unsqueeze(2).unsqueeze(3)
+        if M.numel() == 1:
+            M = M[0, 0]
+        else:
+            M = M.unsqueeze(2).unsqueeze(3)
         eta = torch.zeros((batch_size, 1)).cuda()
         eta_min = -1/M*torch.ones((batch_size, 1, 1, 1)).cuda()
         eta_max =  1/M*torch.ones((batch_size, 1, 1, 1)).cuda()
@@ -590,8 +596,8 @@ def newton_step_cert(x0, true_label, false_target, model, M, verbose=True):
                 eta = (eta_min + eta_max)/2.
 
         dist_sqrd = torch.linalg.norm((x-x0).flatten(1), 2, dim=1)**2 + 2*eta[:, 0, 0, 0]*logits_diff
-        lower_bound = torch.sqrt((dist_sqrd>0).float()*dist_sqrd)
-        grad_norm = torch.norm((eta*g_batch + (x - x0)).flatten(1), 2, dim=1)
+        lower_bound = torch.sqrt((dist_sqrd>0).float()*dist_sqrd).detach()
+        grad_norm = torch.norm((eta*g_batch + (x - x0)).flatten(1), 2, dim=1).detach()
 
         return lower_bound * (grad_norm < 1e-5)
 

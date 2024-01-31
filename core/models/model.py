@@ -99,7 +99,8 @@ class LipschitzNetwork(nn.Module):
                 allActiveCurvatures.append(curvatureTillHere)
             if localPoints is not None:
                 localPoints = layer(localPoints)
-
+        # curvatureOfConv = curvatureTillHere
+        # curvatureTillHere = 0
         for layerCount, layer in enumerate(self.layers_linear):
             if isinstance(layer, SDPBasedLipschitzLinearLayer):
                 # print("performing 100 power iterations")
@@ -137,6 +138,9 @@ class LipschitzNetwork(nn.Module):
                 allActiveCurvatures.append(curvatureTillHere)
             if localPoints is not None:
                 localPoints = layer(localPoints)
+        # print(curvatureTillHere.mean())
+        # print(curvatureOfConv.mean())
+        # raise
         if isinstance(self.last_last, LinearNormalized):
             weight = F.normalize(self.last_last.weight, p=2, dim=1)
             dims = (0, 1)
