@@ -114,16 +114,10 @@ if __name__ == '__main__':
     config = override_args(config, 50, 90, 10, 2048)
   elif config.model_name == 'xlarge':
     config = override_args(config, 70, 120, 15, 2048)
-  elif config.model_name == 'midsmall':
-    config = override_args(config, 10, 25, 3, 1024)
-  elif config.model_name == 'xsmall':
+  elif config.model_name == '3C1F':
     config = override_args(config, 3, 15, 1, 1024)
-  elif config.model_name == 'xxsmall':
-    config = override_args(config, 1, 5, 2, 100)
-  elif config.model_name == 'linsmall':
+  elif config.model_name == '3C5F':
     config = override_args(config, 3, 15, 5, 100)
-  elif config.model_name == 'convsmall':
-    config = override_args(config, 5, 15, 1, 128)
 
 
   elif config.model_name is None and \

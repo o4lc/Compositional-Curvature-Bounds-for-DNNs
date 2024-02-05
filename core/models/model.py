@@ -152,7 +152,6 @@ class LipschitzNetwork(nn.Module):
             curvatureTillHere = torch.linalg.norm(weight, 2, dim=dims) * curvatureTillHere
         elif isinstance(self.last_last, PoolingLinear):
             curvatureTillHere = np.sqrt(2) * curvatureTillHere
-            pass
         else:
             raise NotImplementedError
 
