@@ -27,6 +27,8 @@ import torch.backends.cudnn as cudnn
 from torch.autograd.functional import jacobian 
 from tqdm import tqdm
 
+import matplotlib.pyplot as plt
+
 import pdb
 
 
@@ -82,6 +84,7 @@ class Evaluator:
         self.model = self.model.cuda()
 
         self.load_ckpt()
+        print('Num of Params', self.model.module.model.calcParams())
         if self.config.mode == "certified":
             # self.eval_certified_plot(eps=36/255)
             accuracy, cert_rad, lip_cert_rad, curv_cert_rad, grad_norm, margins, corrects, M = self.evaluate_certified_radius()
@@ -124,17 +127,18 @@ class Evaluator:
                 assert lip_cert_acc_imp >= lip_cert_acc
                 assert lip_cert_acc_imp + curv_cert_acc >= cert_acc
 
-
-
             # for eps in [36, 72, 108, 255]:
-            # for eps in [36]:
             #     if self.config.last_layer == 'lln':
             #         self.eval_certified_lln(eps)
             #     else:
             #         self.eval_certified(eps)
             #         # self.eval_certified_plot(eps)
+                
         elif self.config.mode == "attack":
             self.eval_attack()
+
+        elif self.config.mode == "certified_attack":
+            self.eval_certified_attack()
 
         logging.info("Done with batched inference.")
         delattr(self, 'model')
@@ -144,6 +148,77 @@ class Evaluator:
         lip_cert_rad = (margins[:, -1:] - margins[:, -2:-1]) / lip_cst
         return lip_cert_rad
 
+    @torch.no_grad()
+    def eval_certified_attack(self):
+        print("evaluating certified radius")
+        self.model.eval()
+        running_accuracy = 0
+        running_inputs = 0
+        uncertRad, uncertAcc = [], []
+        Ms, grad_norms, marginss = [], [], []
+        corrects = []
+
+        data_loader, _ = self.reader.load_dataset()
+
+        def grad_f(x):
+            return torch.einsum('ij,ij->i', queryCoefficient, self.model(x))
+
+        for batch_n, data in tqdm(enumerate(data_loader), total=len(data_loader)):
+            inputs, labels = data
+            inputs, labels = inputs.cuda(), labels.cuda()
+
+            outputs = self.model(inputs)
+            predicted = outputs.argmax(axis=1)
+            correct = (outputs.max(1)[1] == labels).unsqueeze(1)
+            corrects.append(correct)
+            margins, index = torch.sort(outputs, 1)
+            M = self.model.module.model.calculateCurvature().unsqueeze(0)
+
+            uncertRad_tmp, uncertAcc_tmp = [], []
+            for attackClass in range(10): 
+                queryCoefficient = torch.zeros(inputs.shape[0], 10).cuda()
+                queryCoefficient[torch.arange(inputs.shape[0]), labels] += 1
+                queryCoefficient[torch.arange(inputs.shape[0]), attackClass] += -1
+
+                grad = jacobian(grad_f, inputs).sum(dim=1).reshape(inputs.shape[0], -1)
+                grad_norm = torch.linalg.norm(grad, 2, dim=1, keepdim=True)
+                isUncert = grad_norm**2 > 2 * M * (margins[:, -1] - outputs[:, attackClass]).unsqueeze(1)
+
+                uncertAcc_tmp.append(isUncert)
+                uncertRad_tmp.append((grad_norm - \
+                                    torch.sqrt(grad_norm**2 - 2 * M * (margins[:, -1] - outputs[:, attackClass]).unsqueeze(1)))/M)
+        
+
+            uncertAcc_tmp = torch.hstack(uncertAcc_tmp)
+            # print(torch.any(uncertAcc_tmp, 1))
+            uncertAcc_tmp = uncertAcc_tmp.sum(1).unsqueeze(1)
+            uncertAcc_tmp = torch.minimum(uncertAcc_tmp, torch.ones_like(uncertAcc_tmp))
+
+            uncertRad_tmp = torch.hstack(uncertRad_tmp)
+            uncertRad_tmp = uncertRad_tmp[(torch.any(uncertAcc_tmp, 1).unsqueeze(1) * correct)[:, 0], :]
+            uncertRad_tmp[torch.isnan(uncertRad_tmp)] = torch.inf
+            uncertRad_tmp[uncertRad_tmp == 0] = torch.inf
+            uncertRad_tmp = torch.min(uncertRad_tmp, 1).values.unsqueeze(1)
+
+            uncertRad.append(uncertRad_tmp)
+            uncertAcc.append(uncertAcc_tmp)
+            
+
+            running_accuracy += predicted.eq(labels.data).cpu().sum().numpy()
+            running_inputs += inputs.size(0)
+            # break
+            
+
+        uncertRad = torch.vstack(uncertRad)
+        uncertAcc = torch.vstack(uncertAcc)
+        plt.hist(uncertRad.detach().cpu().numpy(), bins=20)
+        plt.xlabel('Attack Radius')
+        plt.savefig('attack_radius.pdf')
+        plt.show()
+
+        accuracy = running_accuracy / running_inputs
+        print(accuracy, uncertRad.shape[0]/running_inputs)
+        return accuracy, uncertRad
 
     @torch.no_grad()
     def evaluate_certified_radius(self):
@@ -330,7 +405,8 @@ class Evaluator:
 
     def eval_attack(self):
         """Run evaluation under attack."""
-        calculatePgdAccuracy(self.model, self.reader.load_dataset()[0], self.reader.means, self.config.eps / 255)
+        calculatePgdAccuracy(self.model, self.reader.load_dataset()[0], \
+                            self.reader.means, self.config.eps / 255, M=self.model.module.model.calculateCurvature().item())
         # attack = utils.get_attack_eval(
         #                 self.model,
         #                 self.config.attack,
@@ -429,7 +505,7 @@ class Evaluator:
 
 
 def calculatePgdAccuracy(net, dataset, datasetShift, eps, lBall=2, device=torch.device("cuda"), verbose=True,
-                         dataloaders=None):
+                         dataloaders=None, M=torch.inf):
     # converting the eps that is for the range [0, 1] to the range of the normalized dataset:
     lowerBound = float("inf")
     upperBound = float("-inf")
@@ -439,6 +515,10 @@ def calculatePgdAccuracy(net, dataset, datasetShift, eps, lBall=2, device=torch.
 
     accuracies = (1 - evaluate_madry(dataset, net, eps, False, device, lBall=lBall,
                                      lowerBound=lowerBound, upperBound=upperBound).item()) * 100
+    # alpha=1/M
+    # show_pdg_cmp(dataset, net, eps, alpha, device,lBall=lBall,\
+    #                                  lowerBound=lowerBound, upperBound=upperBound)
+    # raise
     if verbose:
         print("PGD accuracy percentage on test dataset: {}".format(accuracies))
     return accuracies
@@ -462,6 +542,52 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
 
+def _pgdPlot(model, X, Y, epsilon, niters=20, alpha=0.001, lBall=torch.inf, lowerBound=0, upperBound=1):
+    out = model(X)
+    ce = nn.CrossEntropyLoss()(out, Y)
+    err = (out.data.max(1)[1] != Y.data).float().sum() / X.size(0)
+    losses = []
+    X_pgd = Variable(X.data, requires_grad=True)
+    for i in range(niters):
+        # print(i, model(X_pgd))
+        opt = optim.Adam([X_pgd], lr=1e-3)
+        opt.zero_grad()
+        out = model(X_pgd)
+        # out = out - out.mean(1, keepdim=True)
+        # loss = nn.CrossEntropyLoss()(out, Y)
+        loss = -(1 + nn.functional.softmax(out, dim=1)[range(Y.shape[0]), Y]).log().mean()
+        losses.append(loss.item())
+
+        loss.backward()
+        # eta = alpha * X_pgd.grad.data.sign()
+        eta = 1000 * alpha * X_pgd.grad.data * torch.maximum(X_pgd.grad.data.norm(2, (1, 2, 3), keepdim=True)/2, \
+                                                             torch.ones_like(X_pgd.grad.data.norm(2, (1, 2, 3), keepdim=True)))
+
+        X_pgd = Variable(X_pgd.data + eta, requires_grad=True)
+        if lBall == torch.inf:
+            # adjust to be within [-epsilon, epsilon]
+            eta = torch.clamp(X_pgd.data - X.data, -epsilon, epsilon)
+            X_pgd = Variable(X.data + eta, requires_grad=True)
+        elif lBall == 2:
+            y = X_pgd.data - X.data
+            if len(y.shape) == 2:
+                norm = torch.linalg.norm(y, 2, 1, keepdim=True)
+            elif len(y.shape) == 3:
+                norm = torch.linalg.norm(y, "fro", (1, 2), keepdim=True)
+            elif len(y.shape) == 4:
+                norm = torch.linalg.norm(y.reshape(y.shape[0], -1), 2, 1).reshape(y.shape[0], 1, 1, 1)
+            else:
+                raise NotImplementedError
+
+            X_pgd = Variable(torch.clamp(X.data +  y * torch.maximum(epsilon/ norm, torch.ones_like(norm)), lowerBound, upperBound), requires_grad=True)
+            # print(X_pgd)
+        elif lBall == 1:
+            raise NotImplementedError
+        else:
+            raise ValueError
+
+    err_pgd = (model(X_pgd).data.max(1)[1] != Y.data).float().sum() / X.size(0)
+    return err, err_pgd, losses
 
 def _pgd(model, X, Y, epsilon, niters=20, alpha=0.001, lBall=torch.inf, lowerBound=0, upperBound=1):
     out = model(X)
@@ -506,6 +632,64 @@ def _pgd(model, X, Y, epsilon, niters=20, alpha=0.001, lBall=torch.inf, lowerBou
     err_pgd = (model(X_pgd).data.max(1)[1] != Y.data).float().sum() / X.size(0)
     return err, err_pgd
 
+
+def show_pdg_cmp(loader, model, epsilon, alpha=0, device=torch.device("cuda"), lBall=None, lowerBound=-1, upperBound=1):
+    model.eval()
+    for i, (X, y) in tqdm(enumerate(loader), total=len(loader)):
+        X, y = X.to(device), y.to(device)
+        X = X[110:111]
+        y = y[110:111]
+        out = model(X)
+        # grad = jacobian(lambda x: nn.CrossEntropyLoss()(model(x), y), X).sum(0).unsqueeze(0)
+        grad = jacobian(lambda x: model(x)[:, y], X).sum(0).unsqueeze(0)
+        grad2 = jacobian(lambda x: model(x)[:, 0], X).sum(0).unsqueeze(0)
+        t = torch.linspace(-1, 1, 20)
+        t1, t2 = torch.meshgrid(t, t)
+        t = torch.stack([t1.flatten(), t2.flatten()], 1).to(device)
+        outs = []
+        for tt1, tt2 in t:
+            XX = X + tt1 * grad / torch.linalg.norm(grad.flatten(1), 2, 1) + tt2 * grad2 / torch.linalg.norm(grad2.flatten(1), 2, 1)
+            XX = XX.squeeze(0).squeeze(0)
+            out = model(XX)
+            loss = nn.CrossEntropyLoss(reduction='none')(out, y * torch.ones_like(out))
+            outs.append(loss.item())
+        outs = np.vstack(outs).reshape(t1.shape)
+        # XX = X + t * grad / torch.linalg.norm(grad.flatten(1), 2, 1)
+        # out = model(XX)
+        # loss = nn.CrossEntropyLoss(reduction='none')(out, y * torch.ones_like(out))
+        # plt.plot(t.detach().cpu().numpy().reshape(-1, ), loss.detach().cpu().numpy())
+        ax = plt.axes(projection='3d')
+        ax.plot_surface(t1, t2, outs)
+        plt.show()
+    raise
+
+
+
+
+    # perrors = AverageMeter()
+    # epsilon = 0.1
+    # alphas=[0.001 * alpha, 0.1 * alpha, alpha, 10 * alpha]
+    # print(epsilon, alpha, lBall, lowerBound, upperBound)
+    # for alpha in alphas:
+    #     losses = []
+    #     for i, (X, y) in tqdm(enumerate(loader), total=len(loader)):
+    #         X, y = X.to(device), y.to(device)
+
+    #         # # perturb
+    #         _, pgd_err, loss = _pgdPlot(model, Variable(X), Variable(y), epsilon, alpha=alpha, lBall=lBall,
+    #                         lowerBound=lowerBound, upperBound=upperBound, niters=10)
+    #         losses.append(loss)
+    #         perrors.update(pgd_err, X.size(0))
+    #     losses = np.array(losses)
+    #     # print(losses)
+    #     plt.plot(losses.mean(0), label='alpha={}'.format(round(alpha, 4)))
+    #     print(1 - perrors.avg)
+    # plt.legend()
+    # plt.show()
+    # raise
+    # return perrors.avg
+    
+        
 
 def evaluate_madry(loader, model, epsilon, verbose, device=torch.device("cuda"), lBall=torch.inf,
                    lowerBound=0, upperBound=1):

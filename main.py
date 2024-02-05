@@ -18,7 +18,7 @@ def main(config):
   if config.mode == 'train':
     trainer = Trainer(config)
     trainer()
-  elif config.mode in ['certified', 'attack']:
+  elif config.mode in ['certified', 'attack', 'certified_attack']:
     evaluate = Evaluator(config)
     evaluate()
 
@@ -28,7 +28,7 @@ if __name__ == '__main__':
   parser = argparse.ArgumentParser(description='Train or Evaluate Lipschitz Networks.')
 
   # parameters training or eval
-  parser.add_argument("--mode", type=str, default="train", choices=['train', 'certified', 'attack'])
+  parser.add_argument("--mode", type=str, default="train", choices=['train', 'certified', 'attack', 'certified_attack'])
   parser.add_argument("--train_dir", type=str, help="Name of the training directory.")
   parser.add_argument("--trainParentFolder", type=str, help="Name of the training parent directory.",
                       default='./trained_models')
@@ -131,7 +131,7 @@ if __name__ == '__main__':
     ValueError("Choose --model-name 'small' 'medium' 'large' 'xlarge'")
 
   # process argments
-  eval_mode = ['certified', 'attack']
+  eval_mode = ['certified', 'attack', 'certified_attack']
   if config.data_dir is None:
     config.data_dir = os.environ.get('DATADIR', None)
   if config.data_dir is None:

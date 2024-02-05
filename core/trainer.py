@@ -161,6 +161,7 @@ class Trainer:
         self.model = self.model.cuda()
         nb_parameters = np.sum([p.numel() for p in self.model.parameters() if p.requires_grad])
         logging.info(f'Number of parameters to train: {nb_parameters}')
+        
 
         # setup distributed process if training is distributed
         # and use DistributedDataParallel for distributed training
@@ -201,6 +202,7 @@ class Trainer:
             logging.info("Number of files on worker: {}".format(n_files))
             logging.info("Start training")
 
+        print('Num of Params', self.model.module.model.calcParams())
         # training loop
         start_epoch, global_step = 0, 0
         self.best_checkpoint = None
