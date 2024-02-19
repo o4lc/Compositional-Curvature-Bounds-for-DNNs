@@ -165,11 +165,11 @@ class CIFAR10Reader(CIFARReader):
     #    transforms.RandomHorizontalFlip()
     #    ])
 
-    testTransform = transforms.Compose(
-      [transforms.ToTensor(),
-       ])
+    # testTransform = transforms.Compose(
+    #   [transforms.ToTensor(),
+    #    ])
     self.dataset = torchvision.datasets.CIFAR10(root=self.path, train=self.is_training,
-                                                download=True, transform=testTransform)
+                                                download=True, transform=transform)
     # self.dataset = torchvision.datasets.CIFAR10(root='../data', train=self.is_training,
     #                                         download=True, transform=testTransform)
 
