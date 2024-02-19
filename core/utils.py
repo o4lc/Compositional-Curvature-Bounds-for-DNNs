@@ -272,4 +272,8 @@ class TriangularLRScheduler:
       [0, self.lr, self.lr / 20.0, 0])[0]
     self.optimizer.param_groups[0].update(lr=lr)
 
+def stackIfNonempty(x, dim=0):
+  if len(x) == 0:
+    return x
 
+  return torch.cat(x, dim=dim)

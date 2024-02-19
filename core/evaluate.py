@@ -85,9 +85,12 @@ class Evaluator:
 
         self.load_ckpt()
         print('Num of Params', self.model.module.model.calcParams())
+        secondOrderCertificates = True
         if self.config.mode == "certified":
             # self.eval_certified_plot(eps=36/255)
             accuracy, cert_rad, lip_cert_rad, curv_cert_rad, grad_norm, margins, corrects, M = self.evaluate_certified_radius()
+            if len(M) == 0:
+                secondOrderCertificates = False
             epss = [36, 72, 108, 255]
             if self.config.dataset == 'mnist':
                 epss = [403]
@@ -103,16 +106,22 @@ class Evaluator:
 
             for eps in epss:
                 eps_float = eps / 255
-                lip_cst_imp = torch.minimum(grad_norm + M * eps_float, torch.ones_like(grad_norm) * np.sqrt(2.))
-                lip_cert_rad_imp = self.evaluate_certified_radius_lip(lip_cst_imp, margins) * corrects
+                if secondOrderCertificates:
+                    lip_cst_imp = torch.minimum(grad_norm + M * eps_float, torch.ones_like(grad_norm) * np.sqrt(2.))
+                    lip_cert_rad_imp = self.evaluate_certified_radius_lip(lip_cst_imp, margins) * corrects
+                    cert_rad_eps = torch.maximum(cert_rad, lip_cert_rad_imp)
+                    curv_cert_acc = (curv_cert_rad > eps_float).sum() / curv_cert_rad.shape[0]
+                    lip_cert_acc_imp = (lip_cert_rad_imp > eps_float).sum() / lip_cert_rad_imp.shape[0]
+                else:
+                    cert_rad_eps = cert_rad
+                    curv_cert_acc = -1
+                    lip_cert_acc_imp = -1
 
-                cert_rad_eps = torch.maximum(cert_rad, lip_cert_rad_imp)
-                #
+
 
                 cert_acc = (cert_rad_eps > eps_float).sum() / cert_rad.shape[0]
                 lip_cert_acc = (lip_cert_rad > eps_float).sum() / lip_cert_rad.shape[0]
-                curv_cert_acc = (curv_cert_rad > eps_float).sum() / curv_cert_rad.shape[0]
-                lip_cert_acc_imp = (lip_cert_rad_imp > eps_float).sum() / lip_cert_rad_imp.shape[0]
+
 
                 self.message.add('eps', [eps, 255], format='.0f')
                 self.message.add('eps', eps_float, format='.5f')
@@ -124,8 +133,9 @@ class Evaluator:
                 print(self.message.get_message())
                 logging.info(self.message.get_message())
 
-                assert lip_cert_acc_imp >= lip_cert_acc
-                assert lip_cert_acc_imp + curv_cert_acc >= cert_acc
+                if secondOrderCertificates:
+                    assert lip_cert_acc_imp >= lip_cert_acc
+                    assert lip_cert_acc_imp + curv_cert_acc >= cert_acc
 
             # for eps in [36, 72, 108, 255]:
             #     if self.config.last_layer == 'lln':
@@ -266,11 +276,18 @@ class Evaluator:
 
         self.model.train()
         accuracy = running_accuracy / running_inputs
-        curv_cert_rad = torch.vstack(curv_cert_rad)
-        lip_cert_rad = torch.vstack(lip_cert_rad)
-        margins = torch.vstack(marginss); grad_norm = torch.vstack(grad_norms); M = torch.vstack(Ms)
-        cert_rad = torch.maximum(curv_cert_rad, lip_cert_rad)
-        corrects = torch.vstack(corrects)
+        print(accuracy)
+
+        curv_cert_rad = utils.stackIfNonempty(curv_cert_rad)
+        lip_cert_rad = utils.stackIfNonempty(lip_cert_rad)
+        margins = utils.stackIfNonempty(marginss)
+        grad_norm = utils.stackIfNonempty(grad_norms)
+        M = utils.stackIfNonempty(Ms)
+        if len(curv_cert_rad) > 0:
+            cert_rad = torch.maximum(curv_cert_rad, lip_cert_rad)
+        else:
+            cert_rad = lip_cert_rad
+        corrects = utils.stackIfNonempty(corrects)
         return accuracy, cert_rad, lip_cert_rad, curv_cert_rad, grad_norm, margins, corrects, M
 
     # @torch.no_grad()
