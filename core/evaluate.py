@@ -269,7 +269,7 @@ class Evaluator:
                 activ = self.model.module.model.stable_block[0].activation
             else:
                 activ = self.model.model.stable_block[0].activation
-            if isinstance(activ, nn.Tanh):
+            if not isinstance(activ, nn.ReLU):
                 tmp, grad_norm, M, allActiveCurvatures = self.secondOrderCert(inputs, margins, index)
                 Ms.append(M); grad_norms.append(grad_norm); marginss.append(margins)
                 curv_cert_rad.append(tmp * correct)
@@ -504,7 +504,7 @@ class Evaluator:
                 activ = self.model.module.model.stable_block[0].activation
             else:
                 activ = self.model.model.stable_block[0].activation
-            if isinstance(activ, nn.Tanh):
+            if not isinstance(activ, nn.ReLU):
                 tmp_radius, __, __, _ = self.secondOrderCert(inputs, margins, index, eps_float)
                 radiusDistCurv.append((tmp_radius * correct).cpu().numpy() )
             

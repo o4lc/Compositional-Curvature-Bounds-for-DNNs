@@ -189,7 +189,7 @@ def get_scheduler(optimizer, config, num_steps):
   """Return a learning rate scheduler schedulers."""
   if config.scheduler == 'cosine':
     scheduler = lr_scheduler.CosineAnnealingLR(
-      optimizer, T_max=num_steps, eta_min=1e-5)
+      optimizer, T_max=num_steps, eta_min=1e-4)
   elif config.scheduler == 'interp':
     scheduler = TriangularLRScheduler(
       optimizer, num_steps, config.lr)
