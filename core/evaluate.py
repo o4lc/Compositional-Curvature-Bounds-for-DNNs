@@ -150,6 +150,14 @@ class Evaluator:
         elif self.config.mode == "certified_attack":
             self.eval_certified_attack()
 
+        elif self.config.mode == "empiricalCurvature":
+            measure_curvature(self.model,
+                              self.reader.load_dataset()[0],
+                              data_fraction=1,
+                              batch_size=self.config.batch_size,
+                              num_power_iter=20,
+                              device=torch.device("cuda"))
+
         logging.info("Done with batched inference.")
         delattr(self, 'model')
 
@@ -812,3 +820,87 @@ def newton_step_cert(x0, true_label, false_target, model, M, verbose=True):
 #         logits_diff = logits[torch.arange(batch_size), true_label] - logits[torch.arange(batch_size), false_target]
 #     grad_x = torch.autograd.grad(logits_diff.sum(), x_var)[0]
 #     return grad_x
+
+
+def curvature_hessian_estimator(model: torch.nn.Module,
+                                image: torch.Tensor,
+                                target: torch.Tensor,
+                                num_power_iter: int = 20):
+    model.eval()
+    u = torch.randn_like(image)
+    u /= torch.norm(u, p=2, dim=(1, 2, 3), keepdim=True)
+
+    with torch.enable_grad():
+        image = image.requires_grad_()
+        out = model(image)
+        y = F.log_softmax(out, 1)
+        output = F.nll_loss(y, target, reduction='none')
+        model.zero_grad()
+        # Gradients w.r.t. input
+        gradients = torch.autograd.grad(outputs=output.sum(),
+                                        inputs=image, create_graph=True)[0]
+        gnorm = torch.norm(gradients, p=2, dim=(1, 2, 3))
+        assert not gradients.isnan().any()
+
+        # Power method to find singular value of Hessian
+        for _ in range(num_power_iter):
+            grad_vector_prod = (gradients * u.detach_()).sum()
+            hessian_vector_prod = torch.autograd.grad(outputs=grad_vector_prod, inputs=image, retain_graph=True)[0]
+            assert not hessian_vector_prod.isnan().any()
+
+            hvp_norm = torch.norm(hessian_vector_prod, p=2, dim=(1, 2, 3), keepdim=True)
+            u = hessian_vector_prod.div(hvp_norm + 1e-6)  # 1e-6 for numerical stability
+
+        grad_vector_prod = (gradients * u.detach_()).sum()
+        hessian_vector_prod = torch.autograd.grad(outputs=grad_vector_prod, inputs=image)[0]
+        hessian_singular_value = (hessian_vector_prod * u.detach_()).sum((1, 2, 3))
+
+    # curvature = hessian_singular_value / (grad_norm + epsilon) by definition
+    curvatures = hessian_singular_value.abs().div(gnorm + 1e-6)
+    hess = hessian_singular_value.abs()
+    grad = gnorm
+
+    return curvatures, hess, grad
+
+
+def measure_curvature(model: torch.nn.Module,
+                      dataloader: torch.utils.data.DataLoader,
+                      data_fraction: float = 0.1,
+                      batch_size: int = 64,
+                      num_power_iter: int = 20,
+                      device: torch.device = 'cpu'):
+    """
+    Compute curvature, hessian norm and gradient norm of a subset of the data given by the dataloader.
+    These values are computed using the power method, which requires setting the number of power iterations (num_power_iter).
+    """
+
+    model.eval()
+    datasize = int(data_fraction * len(dataloader.dataset))
+    max_batches = int(datasize / batch_size)
+    curvature_agg = torch.zeros(size=(datasize,))
+    grad_agg = torch.zeros(size=(datasize,))
+    hess_agg = torch.zeros(size=(datasize,))
+
+    for idx, (data, target) in tqdm(enumerate(dataloader), total=max_batches - 1):
+        data, target = data.to(device).requires_grad_(), target.to(device)
+        with torch.no_grad():
+            curvatures, hess, grad = curvature_hessian_estimator(model, data, target, num_power_iter=num_power_iter)
+        curvature_agg[idx * batch_size:(idx + 1) * batch_size] = curvatures.detach()
+        hess_agg[idx * batch_size:(idx + 1) * batch_size] = hess.detach()
+        grad_agg[idx * batch_size:(idx + 1) * batch_size] = grad.detach()
+
+        avg_curvature, std_curvature = curvature_agg.mean().item(), curvature_agg.std().item()
+        avg_hessian, std_hessian = hess_agg.mean().item(), hess_agg.std().item()
+        avg_grad, std_grad = grad_agg.mean().item(), grad_agg.std().item()
+
+        if idx == (max_batches - 1):
+            print('Average Curvature: {:.6f} +/- {:.2f} '.format(avg_curvature, std_curvature))
+            print('Average Hessian Spectral Norm: {:.6f} +/- {:.2f} '.format(avg_hessian, std_hessian))
+            print('Average Gradient Norm: {:.6f} +/- {:.2f}'.format(avg_grad, std_grad))
+
+            maxCurvature = torch.max(curvature_agg)
+            maxHessian = torch.max(hess_agg)
+            print('Maximum Curvature: {:.6f} '.format(maxCurvature))
+            print('Maximum Hessian Spectral Norm: {:.6f} '.format(maxHessian))
+            print('Maximum Gradient Norm: {:.6f}'.format(torch.max(grad_agg)))
+            return maxCurvature, maxHessian
