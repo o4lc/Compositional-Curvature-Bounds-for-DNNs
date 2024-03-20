@@ -43,8 +43,24 @@ class SDPBasedLipschitzConvLayer(nn.Module):
 
         if activation == 'relu':
             self.activation = nn.ReLU(inplace=False)
-        else:
+            self.maxSlope = 1
+            self.maxCurv = None
+        elif activation == 'tanh':
             self.activation = nn.Tanh()
+            self.maxSlope = 1
+            self.maxCurv = 4 / np.sqrt(27)
+        elif activation == 'softplus':
+            self.activation = nn.Softplus(beta=1)
+            self.maxSlope = 1
+            self.maxCurv = 0.25
+        elif activation == 'centered_softplus':
+            self.activation = lambda x: nn.Softplus(beta=1)(x) - torch.log(torch.tensor(2.))/1
+            self.maxSlope = 1
+            self.maxCurv = 0.25
+        else:
+            raise NotImplementedError
+        
+        self.anchored = config.anchored
 
         self.kernel = nn.Parameter(torch.empty(cout, cin, kernel_size, kernel_size))
         self.bias = nn.Parameter(torch.empty(cout))
@@ -102,9 +118,9 @@ class SDPBasedLipschitzConvLayer(nn.Module):
 
         wForward = F.conv2d(self.wEigen, self.kernel, padding=1)
         wNorm = torch.linalg.norm(wForward.flatten(), 2)
-        if localPoints is None:
+        if localPoints is None or self.anchored == False:
             activationWNorm2Inf =\
-                4 / np.sqrt(27) * torch.max(torch.linalg.norm(self.kernel.flatten(1), 2, 1))
+                self.maxCurv * torch.max(torch.linalg.norm(self.kernel.flatten(1), 2, 1))
         else:
             assert len(localPoints.shape) == 4
             wPassed = F.conv2d(localPoints, self.kernel, bias=self.bias, padding=1)
@@ -135,8 +151,25 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
 
         if activation == 'relu':
             self.activation = nn.ReLU(inplace=False)
-        else:
+            self.maxSlope = 1
+            self.maxCurv = None
+        elif activation == 'tanh':
             self.activation = nn.Tanh()
+            self.maxSlope = 1
+            self.maxCurv = 4 / np.sqrt(27)
+        elif activation == 'softplus':
+            self.activation = nn.Softplus(beta=1)
+            self.maxSlope = 1
+            self.maxCurv = 0.25
+        elif activation == 'centered_softplus':
+            self.activation = lambda x: nn.Softplus(beta=1)(x) - torch.log(torch.tensor(2.))/1
+            self.maxSlope = 1
+            self.maxCurv = 0.25
+        else:
+            raise NotImplementedError
+        
+        self.anchored = config.anchored
+        
         self.weights = nn.Parameter(torch.empty(cout, cin))
         self.bias = nn.Parameter(torch.empty(cout))
         self.q = nn.Parameter(torch.rand(cout))
@@ -194,8 +227,8 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
     def calculateElementLipschitzs(self, localPoints=None):
         T = self.computeT()
         wNorm = torch.linalg.norm((self.wEigen @ self.weights.T).flatten(), 2)
-        if localPoints is None:
-            activationWNorm2Inf = 4 / np.sqrt(27) * torch.max(torch.linalg.norm(self.weights, 2, 1))
+        if localPoints is None or self.anchored == False:
+            activationWNorm2Inf = self.maxCurv * torch.max(torch.linalg.norm(self.weights, 2, 1))
         else:
             assert len(localPoints.shape) == 2
             wPassed = F.linear(localPoints, self.weights, self.bias)
@@ -216,9 +249,9 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
             wNorm, gNorm, activationWNorm2Inf = self.calculateElementLipschitzs(localPoints=localPoints)
             layerJacobianLipschitz = wNorm * activationWNorm2Inf * gNorm
         elif method == 2:
-            if localPoints is None:
+            if localPoints is None or self.anchored == False:
                 wForward = self.wEigen @ self.weights.T
-                activationWNorm = 4 / np.sqrt(27) * torch.linalg.norm(wForward.flatten(), 2, )
+                activationWNorm = self.maxCurv * torch.linalg.norm(wForward.flatten(), 2, )
             else:
                 assert len(localPoints.shape) == 2
                 wPassed = F.linear(localPoints, self.weights, self.bias)
