@@ -96,6 +96,7 @@ if __name__ == '__main__':
 
   parser.add_argument("--first_layer", type=str, default="padding_channels")
   parser.add_argument("--last_layer", type=str, default="pooling_linear")
+  parser.add_argument("--cpl", action="store_true")
 
   # parse all arguments 
   config = parser.parse_args()

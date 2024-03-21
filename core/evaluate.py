@@ -84,6 +84,9 @@ class Evaluator:
         self.model = self.model.cuda()
 
         self.load_ckpt()
+
+
+
         print('Num of Params', self.model.module.model.calcParams())
         secondOrderCertificates = True
         if self.config.mode == "certified":
@@ -890,6 +893,10 @@ def measure_curvature(model: torch.nn.Module,
     grad_agg = torch.zeros(size=(datasize,))
     hess_agg = torch.zeros(size=(datasize,))
 
+    # maximumM = model.module.model.calculateCurvature(queryCoefficient=None,
+    #                                                   localPoints=None,
+    #                                                   returnAll=False,
+    #                                                   anchorDerivativeTerm=False)
     maximumM = 0
     for idx, (data, target) in tqdm(enumerate(dataloader), total=max_batches - 1):
         data, target = data.to(device).requires_grad_(), target.to(device)
@@ -898,14 +905,14 @@ def measure_curvature(model: torch.nn.Module,
             queryCoefficient[torch.arange(data.shape[0]), target] += 1
             queryCoefficient[torch.arange(data.shape[0]), (target + 1) % numberOfClasses] += -1
 
-            queryCoefficient = None
+            # queryCoefficient = None
 
             curvatures, hess, grad = curvature_hessian_estimator(model, data, target, num_power_iter=num_power_iter,
                                                                  queryCoefficient=queryCoefficient)
 
-            # normalizedInputs = model.module.normalize(data)
-            normalizedInputs = None
-            # is the local point thing wrong? Why is it worse when we provide it?
+            normalizedInputs = model.module.normalize(data)
+            # normalizedInputs = None
+            #
             M = model.module.model.calculateCurvature(queryCoefficient=queryCoefficient,
                                                       localPoints=normalizedInputs,
                                                       returnAll=False,
@@ -913,6 +920,7 @@ def measure_curvature(model: torch.nn.Module,
             newMax = torch.max(M)
             if newMax > maximumM:
                 maximumM = newMax
+
             # M /= np.sqrt(2)  # is multiplied extra by this term.
             # M = np.sqrt(numberOfClasses) * 1 + numberOfClasses * (numberOfClasses - 1) * M
 

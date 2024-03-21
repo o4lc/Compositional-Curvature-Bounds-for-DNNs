@@ -48,7 +48,7 @@ class LipschitzNetwork(nn.Module):
 
         for _ in range(self.depth):
             layers.append(block_conv(config, (1, self.num_channels, imsize, imsize), self.num_channels, self.conv_size,
-                                     activation=activation))
+                                     activation=activation, cpl=config.cpl))
 
         layers.append(nn.AvgPool2d(4, divisor_override=4))
         self.stable_block = nn.Sequential(*layers)
@@ -63,7 +63,7 @@ class LipschitzNetwork(nn.Module):
             in_channels = self.num_channels * 16 * 16
 
         for _ in range(self.depth_linear):
-            layers_linear.append(block_lin(config, in_channels, self.n_features, activation=activation))
+            layers_linear.append(block_lin(config, in_channels, self.n_features, activation=activation, cpl=config.cpl))
 
         if config.last_layer == 'pooling_linear':
             self.last_last = PoolingLinear(in_channels, self.n_classes, agg="trunc")
