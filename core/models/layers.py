@@ -67,9 +67,11 @@ class SDPBasedLipschitzConvLayer(nn.Module):
             self.maxSlope = 1
             self.maxCurv = 0.25 * betaValue
             self.slopeDictionary.multiplyDictionary(self.slopeDictionary.betaPrimeDictionary, betaValue)
-            self.activation = lambda x: nn.functional.softplus(x, beta=betaValue)
-            if activation == 'centered_softplus':
-                self.activation = lambda x: self.activation(x) - torch.log(torch.tensor(2.))/betaValue
+            if activation == 'softplus':
+                self.activation = lambda x: nn.functional.softplus(x, beta=betaValue)
+            elif activation == 'centered_softplus':
+                self.activation = lambda x: nn.functional.softplus(x, beta=betaValue) - torch.log(
+                    torch.tensor(2.)) / betaValue
         else:
             raise NotImplementedError
 
@@ -175,9 +177,10 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
             self.maxSlope = 1
             self.maxCurv = 0.25 * betaValue
             self.slopeDictionary.multiplyDictionary(self.slopeDictionary.betaPrimeDictionary, betaValue)
-            self.activation = lambda x: nn.functional.softplus(x, beta=betaValue)
-            if activation == 'centered_softplus':
-                self.activation = lambda x: self.activation(x) - torch.log(torch.tensor(2.)) / betaValue
+            if activation == 'softplus':
+                self.activation = lambda x: nn.functional.softplus(x, beta=betaValue)
+            elif activation == 'centered_softplus':
+                self.activation = lambda x: nn.functional.softplus(x, beta=betaValue) - torch.log(torch.tensor(2.)) / betaValue
         else:
             raise NotImplementedError
         
