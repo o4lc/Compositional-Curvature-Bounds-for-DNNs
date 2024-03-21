@@ -898,13 +898,13 @@ def measure_curvature(model: torch.nn.Module,
             queryCoefficient[torch.arange(data.shape[0]), target] += 1
             queryCoefficient[torch.arange(data.shape[0]), (target + 1) % numberOfClasses] += -1
 
+            queryCoefficient = None
 
             curvatures, hess, grad = curvature_hessian_estimator(model, data, target, num_power_iter=num_power_iter,
                                                                  queryCoefficient=queryCoefficient)
 
-            normalizedInputs = model.module.normalize(data)
-            queryCoefficient = None
-            # normalizedInputs = None
+            # normalizedInputs = model.module.normalize(data)
+            normalizedInputs = None
             # is the local point thing wrong? Why is it worse when we provide it?
             M = model.module.model.calculateCurvature(queryCoefficient=queryCoefficient,
                                                       localPoints=normalizedInputs,
