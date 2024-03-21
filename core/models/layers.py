@@ -15,25 +15,37 @@ def normalize(input):
 
 
 class SlopeDictionary:
-    betaDictionary, betaPrimeDictionary, maximumValue = createSlopeDictionary()
-    maximumValue = torch.tensor(maximumValue)
+
+    def __init__(self, activationFunction):
+        if "softplus" in activationFunction.lower():
+            activationFunction = "softplus"
+        self.betaDictionary, self.betaPrimeDictionary, maximumValue = createSlopeDictionary(activationFunction)
+        self.maximumValue = torch.tensor(maximumValue)
+
 
     @staticmethod
-    def readFromDictionary(dictionary, points):
-        xx = [round(y, 2) for y in torch.minimum(torch.abs(points), SlopeDictionary.maximumValue).flatten().tolist()]
+    def readFromDictionary(dictionary, points, maximumValue):
+
+        xx = [round(y, 2) for y in torch.minimum(torch.abs(points), maximumValue).flatten().tolist()]
         slopes = []
         for anchorPoint in xx:
             slopes.append(dictionary[anchorPoint])
         # print(anchorPoint, max(slopes))
-        return torch.tensor(slopes).reshape(points.shape).to(points.device).to(points.dtype)
-    @staticmethod
-    def getBeta(x):
-        return SlopeDictionary.readFromDictionary(SlopeDictionary.betaDictionary, x)
+        results = torch.tensor(slopes).reshape(points.shape).to(points.device).to(points.dtype)
+        assert not torch.any(results < dictionary[round(maximumValue.item(), 2)])
+        return results
+
+    def getBeta(self, x):
+        return SlopeDictionary.readFromDictionary(self.betaDictionary, x, self.maximumValue)
+
+
+    def getBetaPrime(self, x):
+        return SlopeDictionary.readFromDictionary(self.betaPrimeDictionary, x, self.maximumValue)
 
     @staticmethod
-    def getBetaPrime(x):
-        return SlopeDictionary.readFromDictionary(SlopeDictionary.betaPrimeDictionary, x)
-
+    def multiplyDictionary(dictionary, multiplier):
+        for key in dictionary.keys():
+            dictionary[key] *= multiplier
 
 
 class SDPBasedLipschitzConvLayer(nn.Module):
@@ -41,6 +53,7 @@ class SDPBasedLipschitzConvLayer(nn.Module):
     def __init__(self, config, input_size, cin, cout, kernel_size=3, epsilon=1e-6, activation='relu'):
         super(SDPBasedLipschitzConvLayer, self).__init__()
 
+        self.slopeDictionary = SlopeDictionary(activation)
         if activation == 'relu':
             self.activation = nn.ReLU(inplace=False)
             self.maxSlope = 1
@@ -49,18 +62,17 @@ class SDPBasedLipschitzConvLayer(nn.Module):
             self.activation = nn.Tanh()
             self.maxSlope = 1
             self.maxCurv = 4 / np.sqrt(27)
-        elif activation == 'softplus':
-            self.activation = nn.Softplus(beta=1)
+        elif 'softplus' in activation.lower():
+            betaValue = 1
             self.maxSlope = 1
-            self.maxCurv = 0.25
-        elif activation == 'centered_softplus':
-            self.activation = lambda x: nn.Softplus(beta=1)(x) - torch.log(torch.tensor(2.))/1
-            self.maxSlope = 1
-            self.maxCurv = 0.25
+            self.maxCurv = 0.25 * betaValue
+            self.slopeDictionary.multiplyDictionary(self.slopeDictionary.betaPrimeDictionary, betaValue)
+            self.activation = nn.Softplus(beta=betaValue)
+            if activation == 'centered_softplus':
+                self.activation = lambda x: self.activation(x) - torch.log(torch.tensor(2.))/betaValue
         else:
             raise NotImplementedError
-        
-        self.anchored = config.anchored
+
 
         self.kernel = nn.Parameter(torch.empty(cout, cin, kernel_size, kernel_size))
         self.bias = nn.Parameter(torch.empty(cout))
@@ -118,13 +130,13 @@ class SDPBasedLipschitzConvLayer(nn.Module):
 
         wForward = F.conv2d(self.wEigen, self.kernel, padding=1)
         wNorm = torch.linalg.norm(wForward.flatten(), 2)
-        if localPoints is None or self.anchored == False:
+        if localPoints is None:
             activationWNorm2Inf =\
                 self.maxCurv * torch.max(torch.linalg.norm(self.kernel.flatten(1), 2, 1))
         else:
             assert len(localPoints.shape) == 4
             wPassed = F.conv2d(localPoints, self.kernel, bias=self.bias, padding=1)
-            betaPrimes = SlopeDictionary.getBetaPrime(wPassed)
+            betaPrimes = self.slopeDictionary.getBetaPrime(wPassed)
             betaPrimes = torch.max(betaPrimes.flatten(2), 2).values
             # print(torch.max(betaPrimes, 1).values)
             # raise
@@ -149,6 +161,7 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
     def __init__(self, config, cin, cout, epsilon=1e-6, activation='relu'):
         super(SDPBasedLipschitzLinearLayer, self).__init__()
 
+        self.slopeDictionary = SlopeDictionary(activation)
         if activation == 'relu':
             self.activation = nn.ReLU(inplace=False)
             self.maxSlope = 1
@@ -157,18 +170,16 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
             self.activation = nn.Tanh()
             self.maxSlope = 1
             self.maxCurv = 4 / np.sqrt(27)
-        elif activation == 'softplus':
-            self.activation = nn.Softplus(beta=1)
+        elif 'softplus' in activation.lower():
+            betaValue = 1
             self.maxSlope = 1
-            self.maxCurv = 0.25
-        elif activation == 'centered_softplus':
-            self.activation = lambda x: nn.Softplus(beta=1)(x) - torch.log(torch.tensor(2.))/1
-            self.maxSlope = 1
-            self.maxCurv = 0.25
+            self.maxCurv = 0.25 * betaValue
+            self.slopeDictionary.multiplyDictionary(self.slopeDictionary.betaPrimeDictionary, betaValue)
+            self.activation = nn.Softplus(beta=betaValue)
+            if activation == 'centered_softplus':
+                self.activation = lambda x: self.activation(x) - torch.log(torch.tensor(2.)) / betaValue
         else:
             raise NotImplementedError
-        
-        self.anchored = config.anchored
         
         self.weights = nn.Parameter(torch.empty(cout, cin))
         self.bias = nn.Parameter(torch.empty(cout))
@@ -227,12 +238,12 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
     def calculateElementLipschitzs(self, localPoints=None):
         T = self.computeT()
         wNorm = torch.linalg.norm((self.wEigen @ self.weights.T).flatten(), 2)
-        if localPoints is None or self.anchored == False:
+        if localPoints is None:
             activationWNorm2Inf = self.maxCurv * torch.max(torch.linalg.norm(self.weights, 2, 1))
         else:
             assert len(localPoints.shape) == 2
             wPassed = F.linear(localPoints, self.weights, self.bias)
-            betaPrimes = SlopeDictionary.getBetaPrime(wPassed)
+            betaPrimes = self.slopeDictionary.getBetaPrime(wPassed)
 
             wRowNorm = torch.linalg.norm(self.weights, 2, 1)
             activationWNorm2Inf = torch.max(wRowNorm.unsqueeze(0) * betaPrimes, 1).values.unsqueeze(1)
@@ -249,13 +260,13 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
             wNorm, gNorm, activationWNorm2Inf = self.calculateElementLipschitzs(localPoints=localPoints)
             layerJacobianLipschitz = wNorm * activationWNorm2Inf * gNorm
         elif method == 2:
-            if localPoints is None or self.anchored == False:
+            if localPoints is None:
                 wForward = self.wEigen @ self.weights.T
                 activationWNorm = self.maxCurv * torch.linalg.norm(wForward.flatten(), 2, )
             else:
                 assert len(localPoints.shape) == 2
                 wPassed = F.linear(localPoints, self.weights, self.bias)
-                betaPrimes = SlopeDictionary.getBetaPrime(wPassed)
+                betaPrimes = self.slopeDictionary.getBetaPrime(wPassed)
 
                 # perform a few power iterations just to converge to local answer
                 eigenVector = self.wEigen.data

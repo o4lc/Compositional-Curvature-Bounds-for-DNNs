@@ -49,7 +49,6 @@ if __name__ == '__main__':
   parser.add_argument("--lr", type=float, default=0.01)
   parser.add_argument("--beta1", type=float, default=0.5)
   parser.add_argument("--beta2", type=float, default=0.9)
-  parser.add_argument("--anchored", type=bool, default=True)
   parser.add_argument("--wd", type=float, default=0, help="Weight decay to use for training.")
   parser.add_argument("--nesterov", action='store_true', default=False)
   parser.add_argument("--warmup_scheduler", type=float, default=0., help="Percentage of training.")
@@ -64,7 +63,8 @@ if __name__ == '__main__':
   parser.add_argument("--logging_verbosity", type=str, default='INFO', help="Level of verbosity of the logs")
   parser.add_argument("--save_checkpoint_epochs", type=int, default=25, help="Save checkpoint every epoch.")
 
-  parser.add_argument("--activation", type=str, default='relu', choices=['relu', 'tanh', 'softplus', 'centered_softplus'])
+  parser.add_argument("--activation", type=str, default='relu', choices=['relu', 'tanh',
+                                                                         'softplus', 'centered_softplus'])
   parser.add_argument("--penalizeCurvature", action='store_true')
   parser.add_argument("--boundCurvature", action='store_true')
 

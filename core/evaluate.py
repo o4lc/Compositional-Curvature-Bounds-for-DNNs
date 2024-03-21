@@ -153,6 +153,7 @@ class Evaluator:
         elif self.config.mode == "empiricalCurvature":
             measure_curvature(self.model,
                               self.reader.load_dataset()[0],
+                              self.reader.n_classes,
                               data_fraction=1,
                               batch_size=self.config.batch_size,
                               num_power_iter=20,
@@ -825,7 +826,8 @@ def newton_step_cert(x0, true_label, false_target, model, M, verbose=True):
 def curvature_hessian_estimator(model: torch.nn.Module,
                                 image: torch.Tensor,
                                 target: torch.Tensor,
-                                num_power_iter: int = 20):
+                                num_power_iter: int = 20,
+                                queryCoefficient=None):
     model.eval()
     u = torch.randn_like(image)
     u /= torch.norm(u, p=2, dim=(1, 2, 3), keepdim=True)
@@ -833,12 +835,18 @@ def curvature_hessian_estimator(model: torch.nn.Module,
     with torch.enable_grad():
         image = image.requires_grad_()
         out = model(image)
-        y = F.log_softmax(out, 1)
-        output = F.nll_loss(y, target, reduction='none')
-        model.zero_grad()
-        # Gradients w.r.t. input
-        gradients = torch.autograd.grad(outputs=output.sum(),
-                                        inputs=image, create_graph=True)[0]
+        if queryCoefficient is None:
+            y = F.log_softmax(out, 1)
+            output = F.nll_loss(y, target, reduction='none')
+            model.zero_grad()
+            # Gradients w.r.t. input
+            gradients = torch.autograd.grad(outputs=output.sum(),
+                                            inputs=image, create_graph=True)[0]
+        else:
+            output = torch.einsum('bi, bi -> b', queryCoefficient, out)
+            gradients = torch.autograd.grad(outputs=output.sum(),
+                                            inputs=image, create_graph=True)[0]
+
         gnorm = torch.norm(gradients, p=2, dim=(1, 2, 3))
         assert not gradients.isnan().any()
 
@@ -865,6 +873,7 @@ def curvature_hessian_estimator(model: torch.nn.Module,
 
 def measure_curvature(model: torch.nn.Module,
                       dataloader: torch.utils.data.DataLoader,
+                      numberOfClasses,
                       data_fraction: float = 0.1,
                       batch_size: int = 64,
                       num_power_iter: int = 20,
@@ -881,10 +890,35 @@ def measure_curvature(model: torch.nn.Module,
     grad_agg = torch.zeros(size=(datasize,))
     hess_agg = torch.zeros(size=(datasize,))
 
+    maximumM = 0
     for idx, (data, target) in tqdm(enumerate(dataloader), total=max_batches - 1):
         data, target = data.to(device).requires_grad_(), target.to(device)
         with torch.no_grad():
-            curvatures, hess, grad = curvature_hessian_estimator(model, data, target, num_power_iter=num_power_iter)
+            queryCoefficient = torch.zeros(data.shape[0], numberOfClasses).cuda()
+            queryCoefficient[torch.arange(data.shape[0]), target] += 1
+            queryCoefficient[torch.arange(data.shape[0]), (target + 1) % numberOfClasses] += -1
+
+
+            curvatures, hess, grad = curvature_hessian_estimator(model, data, target, num_power_iter=num_power_iter,
+                                                                 queryCoefficient=queryCoefficient)
+
+            normalizedInputs = model.module.normalize(data)
+            queryCoefficient = None
+            # normalizedInputs = None
+            # is the local point thing wrong? Why is it worse when we provide it?
+            M = model.module.model.calculateCurvature(queryCoefficient=queryCoefficient,
+                                                      localPoints=normalizedInputs,
+                                                      returnAll=False,
+                                                      anchorDerivativeTerm=False)
+            newMax = torch.max(M)
+            if newMax > maximumM:
+                maximumM = newMax
+            # M /= np.sqrt(2)  # is multiplied extra by this term.
+            # M = np.sqrt(numberOfClasses) * 1 + numberOfClasses * (numberOfClasses - 1) * M
+
+
+        # print(M)
+        # print(hess)
         curvature_agg[idx * batch_size:(idx + 1) * batch_size] = curvatures.detach()
         hess_agg[idx * batch_size:(idx + 1) * batch_size] = hess.detach()
         grad_agg[idx * batch_size:(idx + 1) * batch_size] = grad.detach()
@@ -892,6 +926,9 @@ def measure_curvature(model: torch.nn.Module,
         avg_curvature, std_curvature = curvature_agg.mean().item(), curvature_agg.std().item()
         avg_hessian, std_hessian = hess_agg.mean().item(), hess_agg.std().item()
         avg_grad, std_grad = grad_agg.mean().item(), grad_agg.std().item()
+
+
+
 
         if idx == (max_batches - 1):
             print('Average Curvature: {:.6f} +/- {:.2f} '.format(avg_curvature, std_curvature))
@@ -903,4 +940,6 @@ def measure_curvature(model: torch.nn.Module,
             print('Maximum Curvature: {:.6f} '.format(maxCurvature))
             print('Maximum Hessian Spectral Norm: {:.6f} '.format(maxHessian))
             print('Maximum Gradient Norm: {:.6f}'.format(torch.max(grad_agg)))
+
+            print('Maximum M:', maximumM)
             return maxCurvature, maxHessian
