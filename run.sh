@@ -2,15 +2,15 @@
 
 gpu=0
 
-dataset=cifar10
-model_name=3C1F
-name=tanhTest
+dataset=mnist
+model_name=liplt-4C3F
+name=lipLt
 dir="$dataset/$model_name$name"
-activation=tanh
+activation=softplus
 
 CUDA_VISIBLE_DEVICES=$gpu torchrun --standalone --nnodes=1 --nproc_per_node=gpu main.py --dataset $dataset\
-                --model-name $model_name --train_dir $dir --epochs 1000 --batch_size 256 --activation $activation\
-                --scheduler cosine --lr 0.005 --save_checkpoint_epochs 5 --cpl\
+                --model-name $model_name --train_dir $dir --epochs 100 --batch_size 256 --activation $activation\
+                --scheduler cosine --lr 0.0001 --save_checkpoint_epochs 5
                 # --penalizeCurvature --hessianRegularizerCoefficient 0.1 --hessianRegularizerPrimalDualStepSize 0.01\
                 # --hessianRegularizerPrimalDualEpsilon 0.5 --hessianRegularizerMinimumCoefficient 0.001 \
 

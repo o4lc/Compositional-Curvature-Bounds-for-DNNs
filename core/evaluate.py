@@ -17,7 +17,7 @@ import torch.optim as optim
 import time
 
 from core import utils
-from core.models.model import NormalizedModel, LipschitzNetwork
+from core.models.model import NormalizedModel, SllNetwork, lipschitzModel
 from core.data.readers import readers_config
 
 import numpy as np
@@ -31,6 +31,14 @@ import matplotlib.pyplot as plt
 
 import pdb
 
+
+def isDifferentiable(model):
+    if isinstance(model, nn.DataParallel):
+        activ = model.module.model.activation
+    else:
+        activ = model.model.activation
+    assert activ in ['relu', 'tanh', 'softplus', 'centered_softplus']
+    return activ != "relu"
 
 class Evaluator:
     """Evaluate a Pytorch Model."""
@@ -78,7 +86,7 @@ class Evaluator:
         self.config.means = self.reader.means
 
         # load model
-        self.model = LipschitzNetwork(self.config, self.reader.n_classes, activation=self.config.activation)
+        self.model = lipschitzModel(self.config, self.reader.n_classes, activation=self.config.activation)
         self.model = NormalizedModel(self.model, self.reader.means, self.reader.stds)
         self.model = torch.nn.DataParallel(self.model)
         self.model = self.model.cuda()
@@ -251,7 +259,10 @@ class Evaluator:
         lip_cert_rad, curv_cert_rad = [], []
         Ms, grad_norms, marginss = [], [], []
         corrects = []
-        lip_cst = np.sqrt(2.)
+        if self.config.model_name.startswith("liplt"):
+            lip_cst = self.model.module.model.calculateNetworkLipschitz()
+        else:
+            lip_cst = np.sqrt(2.)
         data_loader, _ = self.reader.load_dataset()
         for batch_n, data in tqdm(enumerate(data_loader), total=len(data_loader)):
             inputs, labels = data
@@ -269,11 +280,7 @@ class Evaluator:
             lip_cert_rad.append(tmp * correct)
 
             # Curv
-            if isinstance(self.model, nn.DataParallel):
-                activ = self.model.module.model.stable_block[0].activation
-            else:
-                activ = self.model.model.stable_block[0].activation
-            if not isinstance(activ, nn.ReLU):
+            if isDifferentiable(self.model):
                 tmp, grad_norm, M, allActiveCurvatures = self.secondOrderCert(inputs, margins, index)
                 Ms.append(M); grad_norms.append(grad_norm); marginss.append(margins)
                 curv_cert_rad.append(tmp * correct)
@@ -504,11 +511,7 @@ class Evaluator:
             correct = outputs.max(1)[1] == labels
             margins, index = torch.sort(outputs, 1)
             radiusDistLip.append((((margins[:, -1] - margins[:, -2]) * correct).cpu().numpy() / (np.sqrt(2.) * lip_cst)) )
-            if isinstance(self.model, nn.DataParallel):
-                activ = self.model.module.model.stable_block[0].activation
-            else:
-                activ = self.model.model.stable_block[0].activation
-            if not isinstance(activ, nn.ReLU):
+            if isDifferentiable(self.model):
                 tmp_radius, __, __, _ = self.secondOrderCert(inputs, margins, index, eps_float)
                 radiusDistCurv.append((tmp_radius * correct).cpu().numpy() )
             

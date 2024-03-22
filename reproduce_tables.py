@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 from core import utils
-from core.models.model import NormalizedModel, LipschitzNetwork
+from core.models.model import NormalizedModel, SllNetwork, lipschitzModel
 from core.data.readers import readers_config
 
 class Config:
@@ -135,7 +135,7 @@ def main():
       config.means = reader.means
 
       # load model
-      model = LipschitzNetwork(config, reader.n_classes)
+      model = lipschitzModel(config, reader.n_classes)
       model = NormalizedModel(model, reader.means, reader.stds)
       model = torch.nn.DataParallel(model)
       model = model.cuda()

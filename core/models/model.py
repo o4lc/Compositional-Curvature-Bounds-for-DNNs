@@ -9,6 +9,9 @@ import numpy as np
 from torch.autograd.functional import jacobian
 from time import time
 from tqdm import tqdm
+from core.models.lipltArchitectures import createLipLtModel
+
+
 
 class NormalizedModel(nn.Module):
 
@@ -21,11 +24,19 @@ class NormalizedModel(nn.Module):
         return self.model(self.normalize(x))
 
 
-class LipschitzNetwork(nn.Module):
+def lipschitzModel(config, n_classes, activation='relu'):
+    if config.model_name.startswith("liplt"):
+        return createLipLtModel(config.networkConfiguration, torch.device("cuda"))
+    else:
+        return SllNetwork(config, n_classes, activation=activation)
+
+
+class SllNetwork(nn.Module):
 
     def __init__(self, config, n_classes, activation='relu'):
-        super(LipschitzNetwork, self).__init__()
+        super(SllNetwork, self).__init__()
 
+        self.activation = activation
         self.depth = config.depth
         self.num_channels = config.num_channels
         self.depth_linear = config.depth_linear
@@ -217,3 +228,6 @@ class LipschitzNetwork(nn.Module):
             if parameter.requires_grad:
                 sum += parameter.shape.numel()
         return sum
+
+    def miniBatchStep(self):
+        pass  # required for other network models.

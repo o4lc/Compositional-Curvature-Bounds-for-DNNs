@@ -12,7 +12,7 @@ from os.path import join, exists
 from tqdm import tqdm
 
 from core import utils
-from core.models.model import NormalizedModel, LipschitzNetwork
+from core.models.model import NormalizedModel, SllNetwork, lipschitzModel
 from core.data.readers import readers_config
 from core.evaluate import Evaluator
 
@@ -156,7 +156,7 @@ class Trainer:
             logging.info(f"Using dataset: {self.config.dataset}")
 
         # load model
-        self.model = LipschitzNetwork(self.config, self.reader.n_classes, self.config.activation)
+        self.model = lipschitzModel(self.config, self.reader.n_classes, self.config.activation)
         self.model = NormalizedModel(self.model, self.reader.means, self.reader.stds)
         self.model = self.model.cuda()
         nb_parameters = np.sum([p.numel() for p in self.model.parameters() if p.requires_grad])
@@ -321,6 +321,10 @@ class Trainer:
         loss.backward()
         self.process_gradients(step)
         self.optimizer.step()
+        if isinstance(self.model, nn.DataParallel):
+            self.model.module.model.miniBatchStep()
+        else:
+            self.model.model.miniBatchStep()
         # with self.warmup.dampening() if self.warmup else nullcontext():
         self.scheduler.step(step)
 
