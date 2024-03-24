@@ -231,3 +231,17 @@ class SllNetwork(nn.Module):
 
     def miniBatchStep(self):
         pass  # required for other network models.
+
+    def converge(self):
+        for layer in self.stable_block:
+            if isinstance(layer, SDPBasedLipschitzConvLayer):
+                for _ in range(10):
+                    T = self.computeT()
+                    neg2TInv = -2 / T
+                    layer.powerIterate(neg2TInv)
+        for layerCount, layer in enumerate(self.layers_linear):
+            if isinstance(layer, SDPBasedLipschitzLinearLayer):
+                for _ in range(10):
+                    T = self.computeT()
+                    neg2TInv = -2 / T
+                    layer.powerIterate(neg2TInv)

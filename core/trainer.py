@@ -222,6 +222,10 @@ class Trainer:
                     self._print_approximated_train_time(start_time)
                 global_step += 1
 
+            for _ in range(100):
+                with torch.no_grad():  # this step is for the convergence of the power iteration method.
+                    self.model.module.model.converge()
+
         self._save_ckpt(global_step, epoch_id, final=True)
         logging.info("Done training -- epoch limit reached.")
 
@@ -276,12 +280,14 @@ class Trainer:
                 self.model.parameters(), self.config.gradient_clip_by_value)
 
     def one_step_training(self, data, epoch, step):
+        numberOfClasses = self.model.module.model.n_classes
 
         self.optimizer.zero_grad()
 
         batch_start_time = time.time()
         images, labels = data
         images, labels = images.cuda(), labels.cuda()
+        thisBatchSize = images.shape[0]
 
         if step == 0 and self.local_rank == 0:
             logging.info(f'images {images.shape}')
@@ -291,12 +297,48 @@ class Trainer:
         if step == 0 and self.local_rank == 0:
             logging.info(f'outputs {outputs.shape}')
 
+        modelCurvature = self.model.module.model.calculateCurvature()
+        maxIndices = torch.argmax(outputs, 1)
+        accuracy = (torch.sum(maxIndices == labels) / labels.shape[0]).item()
+
+        if isinstance(self.model.module.model, SllNetwork):
+            modelLipschitz = torch.tensor([1.])
+        else:
+            modelLipschitz = self.model.module.model.calculateNetworkLipschitz()
+
+        wandb.log({"Lipschitz": modelLipschitz.item()})
+
+        if self.config.crm:
+            lipschitzToUse = modelLipschitz
+            minimumLipschitz = 1
+            if modelLipschitz < minimumLipschitz:
+                lipschitzToUse = modelLipschitz.detach().clone()
+            self.criterion.offset = self.config.offset * lipschitzToUse
+        # if self.config.dynamicOffset:
+        #     self.accuracyMovingAverage = (self.movingAverageFactor * accuracy +
+        #                                   (1 - self.movingAverageFactor) * self.accuracyMovingAverage)
+        #
+        #     self.regularizerCoefficient = (
+        #         max(self.regularizerCoefficient +
+        #             (self.accuracyMovingAverage - self.pdEpsilon) * self.regularizerStepSize,
+        #             self.minimumRegularizerCoefficient))
+        #     if modelLipschitz < self.config.minimumLipschitz:
+        #         valueForOffset = modelLipschitz.detach().clone()
+        #     else:
+        #         valueForOffset = modelLipschitz
+        #     self.criterion.offset = valueForOffset * self.config.offset * self.regularizerCoefficient
+        #     # self.criterion.offset =\
+        #     #     (torch.maximum(modelLipschitz, torch.tensor([self.config.minimumLipschitz]).to(modelLipschitz))
+        #     #      * self.config.offset * self.regularizerCoefficient)
+        #     wandb.log({"Regularizer Coefficient": self.regularizerCoefficient,
+        #                "moving average accuracy": self.accuracyMovingAverage,
+        #                "criterion offset": self.criterion.offset.item()})
+
         loss = self.criterion(outputs, labels)
         wandb.log({"xent loss": loss.item(),
                    "lr": self.optimizer.param_groups[0]['lr']})
 
-        modelCurvature = self.model.module.model.calculateCurvature()
-        accuracy = (torch.sum(torch.argmax(outputs, 1) == labels) / labels.shape[0]).item()
+
         wandb.log({"Curvature Bound": modelCurvature.item(), "accuracy": accuracy,})
         if self.config.penalizeCurvature:
             self.accuracyMovingAverage = (self.movingAverageFactor * accuracy +
@@ -318,6 +360,17 @@ class Trainer:
             loss += self.regularizerCoefficient * modelCurvature
             wandb.log({"Regularizer Coefficient": self.regularizerCoefficient,
                        "total loss": loss.item(), })
+        # elif self.config.crm:
+            # margins = outputs[range(thisBatchSize), maxIndices].unsqueeze(1) - outputs
+            # if isinstance(self.model, nn.DataParallel):
+            #     lipschitzConstants = self.model.module.model.calculateNetworkLipschitz(selfPairDefaultValue=1)
+            #     pairWiseLipschitzConstants =\
+            #         self.model.module.model.createPairwiseLipschitzFromLipschitz(lipschitzConstants, numberOfClasses, 1)
+            # else:
+            #     raise NotImplementedError
+            #
+            # certifiedRadii = margins / pairWiseLipschitzConstants[maxIndices, :]
+            # certifiedRadii[range(thisBatchSize), maxIndices] = torch.inf
         loss.backward()
         self.process_gradients(step)
         self.optimizer.step()

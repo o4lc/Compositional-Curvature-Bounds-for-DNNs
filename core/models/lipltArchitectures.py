@@ -59,6 +59,16 @@ def getNetworkArchitecture(architectureName):
                   ("flatten",),
                   ("linear", 1024, 512),
                   ("linear", 512, 10)]
+    elif architectureName == "6C1F":
+        # 6C2F, CIFAR10
+        layers = [("conv2d", 3, 32, 3, 1, 1),
+                  ("conv2d", 32, 32, 4, 2, 1),
+                  ("conv2d", 32, 64, 3, 1, 1),
+                  ("conv2d", 64, 64, 4, 2, 1),
+                  ("conv2d", 64, 64, 3, 1, 1),
+                  ("conv2d", 64, 64, 4, 2, 1),
+                  ("flatten",),
+                  ("linear", 1024, 10)]
     elif architectureName == "6C2F":
         # 6C2F, CIFAR10
         layers = [("conv2d", 3, 32, 3, 1, 1),
@@ -92,7 +102,7 @@ def getNetworkArchitecture(architectureName):
                   ("linear", 1024, 512),
                   ("linear", 512, 512),
                   ("linear", 512, 10)]
-    elif architectureName == "6C3F":
+    elif architectureName == "6C4F":
         # 6C2F, CIFAR10
         layers = [("conv2d", 3, 32, 3, 1, 1),
                   ("conv2d", 32, 32, 4, 2, 1),

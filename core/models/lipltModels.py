@@ -114,6 +114,14 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
         self.n_classes = self.numberOfClasses
         self.pairwiseClassLimit = 101
         self.activation = activation
+        if activation == 'relu':
+            self.maxCurvature = None
+        elif activation == 'tanh':
+            self.maxCurvature = 4 / np.sqrt(27)
+        elif activation == 'softplus' or activation == "centered_softplus":
+            self.maxCurvature = 0.25
+        else:
+            raise ValueError("Activation function not recognized")
 
         if perClassLipschitz and pairwiseLipschitz:
             raise ValueError("Cannot have both perClassLipschitz and pairwiseLipschitz")
@@ -147,7 +155,10 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         originalStateDictionary = super().state_dict(destination, prefix, keep_vars)
         dictionary = {"original": originalStateDictionary,
-                      "eigenVectors": self.eigenVectorDictionary}
+                      "eigenVectors": self.eigenVectorDictionary,}
+        if not self.singleFullyConnected:
+            dictionary['gwEigen'] = self.gwEigen
+            dictionary['aEigen'] = self.aEigen
         return dictionary
 
     def load_state_dict(self, state_dict,
@@ -165,12 +176,15 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
                                   "It is best to set the number of power iterations"
                                   " to a higher number to achieve more accurate results if needed.")
                     warned = True
+            if not self.singleFullyConnected:
+                self.gwEigen = state_dict['gwEigen']
+                self.aEigen = state_dict['aEigen']
 
     def createDictionaries(self, shapes, flattenIndex, flattenLayer):
         for i in range(len(self.indexMap)):
             self.createEigenvectorAndSubNetwork(i, i, shapes, flattenIndex, flattenLayer)
         if not self.singleFullyConnected:
-            self.aEigen = torch.randn(shapes[-2]).to(self.device)
+            self.aEigen = torch.randn(shapes[-1]).to(self.device)
             self.gwEigen = torch.randn(shapes[-2]).to(self.device)
 
     def createEigenvectorAndSubNetwork(self, startIndex, endIndex, shapes, flattenIndex, flattenLayer):
@@ -245,6 +259,20 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
             else:
                 raise NotImplementedError
         return x
+
+    def applyPowerIteration(self):
+        if self.pairwiseLipschitz or self.perClassLipschitz:
+            raise NotImplementedError
+        for startIndex in range(len(self.indexMap)):
+            endIndex = startIndex
+            x = self.eigenVectorDictionary[(startIndex, endIndex)]
+            layers = self.subNetworkDictionary[(startIndex, endIndex)]
+            for i in range(self.numberOfPowerIterations):
+                x = self.forwardOnLayers(x, layers)
+                x = self.backwardOnLayers(x, layers)
+                norm = torch.linalg.norm(x, None, None)
+                x = x / norm
+            self.eigenVectorDictionary[(startIndex, endIndex)] = x
 
     def calculateSubNetNaiveLipschitz(self, x, startIndex, endIndex, numberOfPowerIterations, k=None, j=None):
         if k is None:
@@ -359,6 +387,8 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
             lipschitzUntilPenultimate.device)
         return pairWiseLipschitzConstants
 
+    def converge(self):
+        self.applyPowerIteration()
 
 class SequentialLipltLipschitz(SequentialNaiveLipschitz):
     def __init__(self, layers, sampleInputShape, device=torch.device("cuda"), perClassLipschitz=True,
@@ -455,6 +485,7 @@ class SequentialLipltLipschitz(SequentialNaiveLipschitz):
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         dictionary = super().state_dict(destination, prefix, keep_vars)
         dictionary['batchEigenVectors'] = self.batchEigenVectorDictionary
+
         return dictionary
 
     def applyLayerForward(self, layer, x):
@@ -524,8 +555,8 @@ class SequentialLipltLipschitz(SequentialNaiveLipschitz):
             if not self.singleFullyConnected:
                 G = self.layers[self.indexMap[-1]].weight
                 W = self.layers[self.indexMap[-2]].weight
-                aForward = torch.einsum("bl,il,lj->bij",
-                                        self.aEigen, G, W)
+                aForward = torch.einsum("il, lj, bl -> bij",
+                                        G, W, self.aEigen)
                 aBackward = torch.einsum('il, lj, bij -> bl', G, W, aForward)
                 self.aEigen = aBackward / torch.linalg.norm(aBackward.flatten(), 2)
 
@@ -566,7 +597,8 @@ class SequentialLipltLipschitz(SequentialNaiveLipschitz):
     def calculateNetworkLipschitz(self, selfPairDefaultValue=0, naive=False):
         if naive:
             return super().calculateNetworkLipschitz(selfPairDefaultValue)
-        self.applyPowerIteration()
+        with torch.no_grad():
+            self.applyPowerIteration()
         ms = self.calculateSubNetsImprovedLipschitz()
         if not self.perClassLipschitz and not self.pairwiseLipschitz:
             return ms[-1]
@@ -622,7 +654,8 @@ class SequentialLipltLipschitz(SequentialNaiveLipschitz):
 
     def calculateCurvature(self, queryCoefficient=None, localPoints=None, returnAll=False, anchorDerivativeTerm=False):
         individualLayerLipschitzs = super().calculateNetworkLipschitz(returnAll=True)
-        self.applyPowerIteration()
+        with torch.no_grad():
+            self.applyPowerIteration()
         ms = [1] + self.calculateSubNetsImprovedLipschitz()
 
         offset = 1
@@ -639,7 +672,7 @@ class SequentialLipltLipschitz(SequentialNaiveLipschitz):
                 rowTwoNorm = torch.linalg.norm(currentLayer.weight, 2, 1)
             else:
                 rowTwoNorm = torch.linalg.norm(currentLayer.weight.flatten(1), 2, 1)
-            layerJacobianLipschitz = torch.max(rowTwoNorm) ** 2
+            layerJacobianLipschitz = self.maxCurvature * torch.max(rowTwoNorm) ** 2
 
             curvature = layerJacobianLipschitz * lipschitzTillHere ** 2 + layerLipschitz * curvature
             allCurvatures.append(curvature)
@@ -652,16 +685,28 @@ class SequentialLipltLipschitz(SequentialNaiveLipschitz):
             aForward = torch.einsum("bl,il,lj->bij",
                                     self.aEigen, G, W)
             aLipschitz = torch.linalg.norm(aForward.flatten(), 2)
+
             gwForward = self.gwEigen @ W.T @ G.T
             gwLipschitz = torch.linalg.norm(gwForward.flatten(), 2)
 
-            layerJacobianLipschitz = aLipschitz * individualLayerLipschitzs[-2]
+            layerJacobianLipschitz = self.maxCurvature * aLipschitz * individualLayerLipschitzs[-2]
             layerLipschitz = 0.5 * (individualLayerLipschitzs[-1] * individualLayerLipschitzs[-2] + gwLipschitz)
             curvature = layerJacobianLipschitz * ms[-2] ** 2 + layerLipschitz * curvature
+
+        curvature *= np.sqrt(2)
+        # curvature = curvature * torch.
+        if queryCoefficient is not None:
+            curvature = curvature * torch.ones(queryCoefficient.shape[0], 1).to(self.device)
+
         allCurvatures.append(curvature)
         if returnAll:
             return curvature, allCurvatures
         return curvature
+
+    def converge(self):
+        for _ in range(10):
+            super().applyPowerIteration()
+            self.applyPowerIteration()
 
 
 

@@ -18,6 +18,7 @@ import time
 
 from core import utils
 from core.models.model import NormalizedModel, SllNetwork, lipschitzModel
+from core.models.lipltModels import SequentialLipschitzNetwork
 from core.data.readers import readers_config
 
 import numpy as np
@@ -93,15 +94,32 @@ class Evaluator:
 
         self.load_ckpt()
 
+        for i in range(100):  # converge for power iteration
+            with torch.no_grad():
+                self.model.module.model.converge()
+            # if self.config.model_name.startswith("liplt"):
+            #     self.model.module.model.calculateNetworkLipschitz()
+            # if isDifferentiable(self.model):
+            #     self.model.module.model.calculateCurvature()
 
+        if isinstance(self.model.module.model, SllNetwork):
+            lipschitzConstant = 1.
+        elif isinstance(self.model.module.model, SequentialLipschitzNetwork):
+            lipschitzConstant = self.model.module.model.calculateNetworkLipschitz()
+        else:
+            raise ValueError
 
         print('Num of Params', self.model.module.model.calcParams())
         secondOrderCertificates = True
         if self.config.mode == "certified":
             # self.eval_certified_plot(eps=36/255)
             accuracy, cert_rad, lip_cert_rad, curv_cert_rad, grad_norm, margins, corrects, M = self.evaluate_certified_radius()
+
+            # print(M.shape, grad_norm.shape, margins.shape, cert_rad.shape)
+            # raise
             if len(M) == 0:
                 secondOrderCertificates = False
+            # secondOrderCertificates = False
             epss = [36, 72, 108, 255]
             if self.config.dataset == 'mnist':
                 epss = [403]
@@ -113,12 +131,12 @@ class Evaluator:
                 curv_cert_rad_tmp = self.newton_cert_rad(M).unsqueeze(1)
                 curv_cert_rad = torch.maximum(curv_cert_rad, curv_cert_rad_tmp)
                 cert_rad = torch.maximum(cert_rad, curv_cert_rad)
-                
 
             for eps in epss:
                 eps_float = eps / 255
                 if secondOrderCertificates:
-                    lip_cst_imp = torch.minimum(grad_norm + M * eps_float, torch.ones_like(grad_norm) * np.sqrt(2.))
+                    lip_cst_imp = torch.minimum(grad_norm + M * eps_float,
+                                                torch.ones_like(grad_norm) * np.sqrt(2.) * lipschitzConstant)
                     lip_cert_rad_imp = self.evaluate_certified_radius_lip(lip_cst_imp, margins) * corrects
                     cert_rad_eps = torch.maximum(cert_rad, lip_cert_rad_imp)
                     curv_cert_acc = (curv_cert_rad > eps_float).sum() / curv_cert_rad.shape[0]
@@ -260,9 +278,10 @@ class Evaluator:
         Ms, grad_norms, marginss = [], [], []
         corrects = []
         if self.config.model_name.startswith("liplt"):
-            lip_cst = self.model.module.model.calculateNetworkLipschitz()
+            lip_cst = np.sqrt(2.) * self.model.module.model.calculateNetworkLipschitz()
         else:
             lip_cst = np.sqrt(2.)
+
         data_loader, _ = self.reader.load_dataset()
         for batch_n, data in tqdm(enumerate(data_loader), total=len(data_loader)):
             inputs, labels = data
@@ -292,6 +311,7 @@ class Evaluator:
             # raise
             running_accuracy += predicted.eq(labels.data).cpu().sum().numpy()
             running_inputs += inputs.size(0)
+
 
         self.model.train()
         accuracy = running_accuracy / running_inputs
@@ -392,6 +412,8 @@ class Evaluator:
                 self.model.module.model.calculateCurvature(localPoints=normalizedInputs,
                                                            returnAll=returnAll,
                                                            anchorDerivativeTerm=anchorDerivativeTerm)
+        if M.shape != grad_norm.shape:
+            M = M * torch.ones_like(grad_norm)
         if True:
             diff = margins[:, -2:-1] - margins[:, -1:]
             cert_rad = (-grad_norm + torch.sqrt(grad_norm**2 - 2 * M * diff)) / M
