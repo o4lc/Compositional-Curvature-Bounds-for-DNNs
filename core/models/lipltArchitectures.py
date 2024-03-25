@@ -294,6 +294,7 @@ def createLipLtModel(networkConfiguration, device):
     layerConfigurations = networkConfiguration['layers']
     layers = []
     activation = networkConfiguration['activation']
+    learnableBeta = networkConfiguration['learnableBeta']
     for layer in layerConfigurations:
         layerName = layer[0]
         if layerName == "flatten":
@@ -332,9 +333,9 @@ def createLipLtModel(networkConfiguration, device):
             elif currentActivation == "tanh":
                 layers.append(nn.Tanh())
             elif currentActivation == "softplus":
-                layers.append(Softplus())
+                layers.append(Softplus(learnable=learnableBeta))
             elif currentActivation == "centered_softplus":
-                layers.append(CenteredSoftplus())
+                layers.append(CenteredSoftplus(learnable=learnableBeta))
             else:
                 raise ValueError
         else:

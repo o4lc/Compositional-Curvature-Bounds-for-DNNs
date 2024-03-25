@@ -33,12 +33,16 @@ class Conv2dBatchNorm(nn.Module):
 
 
 class Softplus(nn.Module):
-    def __init__(self, beta=1):
+    def __init__(self, beta=1, learnable=False):
         super(Softplus, self).__init__()
-        self.beta = beta
+        self.beta = nn.Parameter(torch.tensor(beta), requires_grad=learnable)
+        self.learnable = learnable
+        self.threshold = 20
 
     def forward(self, x):
-        return torch.nn.functional.softplus(x, self.beta)
+        smallIndices = x * self.beta < self.threshold
+        x = torch.where(smallIndices, torch.log(1 + torch.exp(x * self.beta)) / self.beta, x)
+        return x
 
 
 class CenteredSoftplus(Softplus):
@@ -652,6 +656,14 @@ class SequentialLipltLipschitz(SequentialNaiveLipschitz):
             self.gwEigen.detach_()
 
 
+    def getActivationCurvature(self, activationLayer):
+        maximumCurvature = self.maxCurvature
+        if self.activation == 'softplus' or self.activation == "centered_softplus":
+            if activationLayer.learnable:
+                maximumCurvature *= activationLayer.beta
+        return maximumCurvature
+
+
     def calculateCurvature(self, queryCoefficient=None, localPoints=None, returnAll=False, anchorDerivativeTerm=False):
         individualLayerLipschitzs = super().calculateNetworkLipschitz(returnAll=True)
         with torch.no_grad():
@@ -669,10 +681,11 @@ class SequentialLipltLipschitz(SequentialNaiveLipschitz):
             currentLayer = self.layers[self.indexMap[i]]
 
             if isinstance(currentLayer, nn.modules.linear.Linear):
-                rowTwoNorm = torch.linalg.norm(currentLayer.weight, 2, 1)
+                layerRowTwoNorm = torch.linalg.norm(currentLayer.weight, 2, 1)
             else:
-                rowTwoNorm = torch.linalg.norm(currentLayer.weight.flatten(1), 2, 1)
-            layerJacobianLipschitz = self.maxCurvature * torch.max(rowTwoNorm) ** 2
+                layerRowTwoNorm = torch.linalg.norm(currentLayer.weight.flatten(1), 2, 1)
+            layerJacobianLipschitz = (self.getActivationCurvature(self.layers[self.indexMap[i] + 1])
+                                      * torch.max(layerRowTwoNorm) * layerLipschitz)
 
             curvature = layerJacobianLipschitz * lipschitzTillHere ** 2 + layerLipschitz * curvature
             allCurvatures.append(curvature)
@@ -689,7 +702,7 @@ class SequentialLipltLipschitz(SequentialNaiveLipschitz):
             gwForward = self.gwEigen @ W.T @ G.T
             gwLipschitz = torch.linalg.norm(gwForward.flatten(), 2)
 
-            layerJacobianLipschitz = self.maxCurvature * aLipschitz * individualLayerLipschitzs[-2]
+            layerJacobianLipschitz = self.getActivationCurvature(self.layers[self.indexMap[-2] + 1]) * aLipschitz * individualLayerLipschitzs[-2]
             layerLipschitz = 0.5 * (individualLayerLipschitzs[-1] * individualLayerLipschitzs[-2] + gwLipschitz)
             curvature = layerJacobianLipschitz * ms[-2] ** 2 + layerLipschitz * curvature
 

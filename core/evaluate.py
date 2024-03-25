@@ -125,7 +125,9 @@ class Evaluator:
                 epss = [403]
 
             if self.config.newtonStep:
-                M = self.model.module.model.calculateCurvature().unsqueeze(0).unsqueeze(0)
+                M = self.model.module.model.calculateCurvature()
+                while len(M.shape) < 2:
+                    M = M.unsqueeze(0)
                 data_loader, _ = self.reader.load_dataset()
                 M = M.repeat(data_loader.dataset.__len__(), 1)
                 curv_cert_rad_tmp = self.newton_cert_rad(M).unsqueeze(1)

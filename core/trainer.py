@@ -298,15 +298,16 @@ class Trainer:
             logging.info(f'outputs {outputs.shape}')
 
         modelCurvature = self.model.module.model.calculateCurvature()
+        if len(modelCurvature.shape) == 1:
+            modelCurvature = modelCurvature[0]
         maxIndices = torch.argmax(outputs, 1)
         accuracy = (torch.sum(maxIndices == labels) / labels.shape[0]).item()
 
         if isinstance(self.model.module.model, SllNetwork):
-            modelLipschitz = torch.tensor([1.])
+            modelLipschitz = 1.
         else:
             modelLipschitz = self.model.module.model.calculateNetworkLipschitz()
-
-        wandb.log({"Lipschitz": modelLipschitz.item()})
+            wandb.log({"Lipschitz": modelLipschitz.item()})
 
         if self.config.crm:
             lipschitzToUse = modelLipschitz

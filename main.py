@@ -98,6 +98,9 @@ if __name__ == '__main__':
     parser.add_argument("--last_layer", type=str, default="pooling_linear")
     parser.add_argument("--cpl", action="store_true")
     parser.add_argument("--crm", action="store_true")
+    parser.add_argument("--learnableBeta", action="store_true",
+                        help="Learnable beta for the softplus "
+                             "activation. Currently only supported for liplt architectures")
 
     # parse all arguments
     config = parser.parse_args()
@@ -141,6 +144,7 @@ if __name__ == '__main__':
             raise ValueError("Dataset not supported")
         config.networkConfiguration = {"perClassLipschitz": False,
                                        "activation": config.activation,
+                                       'learnableBeta': config.learnableBeta,
                                        "numberOfPowerIterations": 5,
                                        "inputShape": inputShape,
                                        "modelType": "liplt",
