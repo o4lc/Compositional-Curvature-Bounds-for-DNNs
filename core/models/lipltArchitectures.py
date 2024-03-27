@@ -4,7 +4,16 @@ from core.models.lipltModels import *
 
 def getNetworkArchitecture(architectureName):
     # image width after a conv layer: width - kernelSize + 1
-    if architectureName == "3F":
+    if architectureName == "6F":
+        # 6F, CIFAR10
+        layers = [("flatten", None),
+                ("linear", 3072, 1024),
+                ("linear", 1024, 512),
+                ("linear", 512, 256),
+                ("linear", 256, 256),
+                ("linear", 256, 128),
+                ("linear", 128, 10),]
+    elif architectureName == "3F":
         # 3F, MNIST
         layers = [("flatten", None),
                   ("linear", 784, 100),

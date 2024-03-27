@@ -222,13 +222,20 @@ class Evaluator:
             correct = (outputs.max(1)[1] == labels).unsqueeze(1)
             corrects.append(correct)
             margins, index = torch.sort(outputs, 1)
+
+            # Iterative Curvature
             M = self.model.module.model.calculateCurvature().unsqueeze(0)
+                
 
             uncertRad_tmp, uncertAcc_tmp = [], []
             for attackClass in range(10): 
                 queryCoefficient = torch.zeros(inputs.shape[0], 10).cuda()
                 queryCoefficient[torch.arange(inputs.shape[0]), labels] += 1
                 queryCoefficient[torch.arange(inputs.shape[0]), attackClass] += -1
+
+                if False:
+                    # Set True if you want to calculate the curvature using the Naive Hessian Method
+                    M = self.model.module.model.calculateHessian(queryCoefficient, method='lipLT')
 
                 grad = jacobian(grad_f, inputs).sum(dim=1).reshape(inputs.shape[0], -1)
                 grad_norm = torch.linalg.norm(grad, 2, dim=1, keepdim=True)
@@ -267,7 +274,7 @@ class Evaluator:
         plt.show()
 
         accuracy = running_accuracy / running_inputs
-        print(accuracy, uncertRad.shape[0]/running_inputs)
+        print(accuracy, uncertRad.shape[0])
         return accuracy, uncertRad
 
     @torch.no_grad()
@@ -717,6 +724,7 @@ def show_pdg_cmp(loader, model, epsilon, alpha=0, device=torch.device("cuda"), l
         ax = plt.axes(projection='3d')
         ax.plot_surface(t1, t2, outs)
         plt.show()
+        break
     raise
 
 
@@ -978,3 +986,5 @@ def measure_curvature(model: torch.nn.Module,
 
             print('Maximum M:', maximumM)
             return maxCurvature, maxHessian
+        
+
