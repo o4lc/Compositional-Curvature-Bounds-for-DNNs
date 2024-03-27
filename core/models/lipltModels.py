@@ -353,6 +353,8 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
             if returnAll:
                 return layerLipschitzs
             return currentLipschitz
+        
+    
 
     @staticmethod
     def createPairwiseLipschitzFromLipschitz(lipschitzConstants, numberOfClasses, selfPairDefaultValue=0):
@@ -721,6 +723,55 @@ class SequentialLipltLipschitz(SequentialNaiveLipschitz):
             super().applyPowerIteration()
             self.applyPowerIteration()
 
+    def calculateHessian(self, queryCoefficient, method='naive'):
+        g = 1
+        h = self.maxCurvature
 
+        # print(self)
+
+        numLayers = (len(self.linear)) // 2
+
+        params = [self.linear[self.indexMap[i]].weight for i in range(len(self.indexMap))]
+        params[-1] = queryCoefficient[:] @ params[-1]
+
+        r = torch.zeros((numLayers, 1)).to(self.device)
+        if method == 'naive':
+            individualLayerLipschitzs = super().calculateNetworkLipschitz(returnAll=True)
+            r[0] = individualLayerLipschitzs[0]
+            for i in range(1, numLayers-1):
+                r[i] = g * individualLayerLipschitzs[i] * r[i - 1]
+
+            # for i in range(1, numLayers):
+            #     r[i] = g * torch.linalg.norm(params[i], ord=2) * r[i - 1]
+        elif method == 'lipLT':
+            r = self.calculateSubNetsImprovedLipschitz()
+            # r = self.calculateNetworkLipschitz(returnLayerLipschitz=True)[2]
+
+        S = []  
+        # Using simple recursion for S
+        for i in range(numLayers - 1):
+            SS = []
+            for j in range(i+1, numLayers): 
+                if i == j - 1:
+                    SS.append(torch.abs(params[j]))
+                else:
+                    SS.append(g * torch.abs(params[j]) @ SS[-1])  
+
+            # print(SS[-1].shape)
+            S.append(SS[-1])
+        # print('--')
+        # print(S[-1].shape, torch.max(S[-1], dim=(1), keepdim=True).values)
+        # print(torch.linalg.norm(params[-1][0], ord=float(torch.inf)))
+        # raise
+        summationTerm=torch.zeros((queryCoefficient.shape[0], 1)).to(self.device)
+        for l in range(numLayers-1):
+            # print(torch.Tensor(S[l]).shape)
+            # print((r[l]**2).shape)
+            # print(torch.max(S[l], dim=(1), keepdim=True).values)
+            summationTerm += r[l]**2 * torch.max(S[l], dim=(1), keepdim=True).values
+            
+        
+        # print(summationTerm.shape)
+        return summationTerm * h
 
 

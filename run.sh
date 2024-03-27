@@ -29,16 +29,16 @@ gpu=0
 #                 --hessianRegularizerPrimalDualStepSize 0.0
 
 
-dataset=cifar100
-model_name=liplt-8C2FCIFAR100
-name=c100clean
-dir="$dataset/$model_name$name"
-activation=centered_softplus
+# dataset=cifar100
+# model_name=liplt-8C2FCIFAR100
+# name=c100clean
+# dir="$dataset/$model_name$name"
+# activation=centered_softplus
 
-CUDA_VISIBLE_DEVICES=$gpu torchrun --standalone --nnodes=1 --nproc_per_node=gpu main.py --dataset $dataset\
-                --model-name $model_name --train_dir $dir --epochs 1000 --batch_size 256 --activation $activation\
-                --scheduler cosine --lr 0.001 --save_checkpoint_epochs 10\
-                --offset 0. --temperature 0.25
+# CUDA_VISIBLE_DEVICES=$gpu torchrun --standalone --nnodes=1 --nproc_per_node=gpu main.py --dataset $dataset\
+#                 --model-name $model_name --train_dir $dir --epochs 1000 --batch_size 256 --activation $activation\
+#                 --scheduler cosine --lr 0.001 --save_checkpoint_epochs 10\
+#                 --offset 0. --temperature 0.25
 
 # CUDA_VISIBLE_DEVICES=$gpu python3 main.py --mode certified_attack --dataset $dataset --model-name $model_name\
             #  --train_dir $dir --activation $activation
@@ -72,13 +72,22 @@ CUDA_VISIBLE_DEVICES=$gpu torchrun --standalone --nnodes=1 --nproc_per_node=gpu 
 #                --crm --offset 0.25
 #
 #
-#dataset=cifar10
-#model_name=liplt-11C4F
-#name=lipLt
-#dir="$dataset/$model_name$name"
-#activation=centered_softplus
+dataset=cifar10
+model_name=small
+name=TanhClean
+dir="$dataset/$model_name$name"
+activation=tanh
 #
-#CUDA_VISIBLE_DEVICES=$gpu torchrun --standalone --nnodes=1 --nproc_per_node=gpu main.py --dataset $dataset\
-#                --model-name $model_name --train_dir $dir --epochs 100 --batch_size 256 --activation $activation\
-#                --scheduler cosine --lr 0.0001 --save_checkpoint_epochs 5\
-#                --crm --offset 0.25
+CUDA_VISIBLE_DEVICES=$gpu torchrun --standalone --nnodes=1 --nproc_per_node=gpu main.py --dataset $dataset\
+               --model-name $model_name --train_dir $dir --epochs 1000 --batch_size 256 --activation $activation\
+               --scheduler cosine --lr 0.0001 --save_checkpoint_epochs 50
+            #    --crm --offset 0.25
+
+# CUDA_VISIBLE_DEVICES=$gpu python3 main.py --mode certified_attack --dataset $dataset --model-name $model_name\
+#              --train_dir $dir --activation $activation
+
+CUDA_VISIBLE_DEVICES=$gpu python3 main.py --mode attack --dataset $dataset --model-name $model_name\
+            --train_dir $dir --activation $activation
+#
+CUDA_VISIBLE_DEVICES=$gpu python3 main.py --mode certified --dataset $dataset --model-name $model_name\
+            --train_dir $dir --activation $activation --newtonStep
