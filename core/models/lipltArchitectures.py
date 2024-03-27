@@ -10,6 +10,15 @@ def getNetworkArchitecture(architectureName):
                   ("linear", 784, 100),
                   ("linear", 100, 100),
                   ("linear", 100, 10)]
+    elif architectureName == "6F":
+        # 3F, MNIST
+        layers = [("flatten", None),
+                  ("linear", 3072, 1024),
+                  ("linear", 1024, 512),
+                  ("linear", 512, 256),
+                  ("linear", 256, 256),
+                  ("linear", 256, 128),
+                  ("linear", 128, 10),]
     elif architectureName == "vggSim":
         # similar to vgg, MNIST
         layers = [("conv2d", 3, 64, 7),
