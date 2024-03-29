@@ -161,7 +161,11 @@ class Trainer:
         self.model = self.model.cuda()
         nb_parameters = np.sum([p.numel() for p in self.model.parameters() if p.requires_grad])
         logging.info(f'Number of parameters to train: {nb_parameters}')
-        
+
+        if self.config.loadCheckpoint:
+            checkpoint = torch.load(self.config.checkpointPath, map_location=self.model.device)
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+
 
         # setup distributed process if training is distributed
         # and use DistributedDataParallel for distributed training
@@ -360,6 +364,13 @@ class Trainer:
                     self.minimumRegularizerCoefficient))
             loss += self.regularizerCoefficient * modelCurvature
             wandb.log({"Regularizer Coefficient": self.regularizerCoefficient,
+                       "total loss": loss.item(), })
+        elif self.config.penalizeHessian:
+            hessian = torch.autograd.functional.hessian(lambda x: self.model(x).mean(), images)
+            hessian = hessian.view(thisBatchSize, -1)
+            hessian = torch.norm(hessian, p=2, dim=1)
+            loss += self.regularizerCoefficient * hessian.mean()
+            wandb.log({"Hessian Norm": hessian.mean().item(),
                        "total loss": loss.item(), })
         # elif self.config.crm:
             # margins = outputs[range(thisBatchSize), maxIndices].unsqueeze(1) - outputs

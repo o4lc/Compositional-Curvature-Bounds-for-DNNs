@@ -101,6 +101,10 @@ if __name__ == '__main__':
     parser.add_argument("--learnableBeta", action="store_true",
                         help="Learnable beta for the softplus "
                              "activation. Currently only supported for liplt architectures")
+    parser.add_argument("--loadCheckpoint", action="store_true")
+    parser.add_argument("--checkpointPath", type=str, help="Full path to the checkpoint")
+    parser.add_argument("--penalizeHessian", action="store_true")
+
 
     # parse all arguments
     config = parser.parse_args()
