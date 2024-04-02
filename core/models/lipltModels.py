@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.init as init
 import numpy as np
 import time
+from core.utils import SlopeDictionary
 
 class Conv2dBatchNorm(nn.Module):
     def __init__(self, inChannels, outChannels, kernelSize, stride, padding, bias=True):
@@ -105,6 +106,7 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
                  **kwargs):
         super(SequentialNaiveLipschitz, self).__init__(layers, weightInitialization)
         self.eigenVectorDictionary = {}
+        self.jacobianLipschitzEigenvectorDictionary = {}
         self.subNetworkDictionary = {}
         self.indexMap = []
         self.preFlattenShape = None
@@ -118,6 +120,7 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
         self.n_classes = self.numberOfClasses
         self.pairwiseClassLimit = 101
         self.activation = activation
+        self.slopeDictionary = SlopeDictionary(activation)
         if activation == 'relu':
             self.maxCurvature = None
         elif activation == 'tanh':
@@ -126,6 +129,7 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
             self.maxCurvature = 0.25
         else:
             raise ValueError("Activation function not recognized")
+
 
         if perClassLipschitz and pairwiseLipschitz:
             raise ValueError("Cannot have both perClassLipschitz and pairwiseLipschitz")
@@ -159,7 +163,8 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         originalStateDictionary = super().state_dict(destination, prefix, keep_vars)
         dictionary = {"original": originalStateDictionary,
-                      "eigenVectors": self.eigenVectorDictionary,}
+                      "eigenVectors": self.eigenVectorDictionary,
+                      "jacobianLipschitzEigenvectorDictionary": self.jacobianLipschitzEigenvectorDictionary}
         if not self.singleFullyConnected:
             dictionary['gwEigen'] = self.gwEigen
             dictionary['aEigen'] = self.aEigen
@@ -180,6 +185,17 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
                                   "It is best to set the number of power iterations"
                                   " to a higher number to achieve more accurate results if needed.")
                     warned = True
+            warned = False
+            for key in self.jacobianLipschitzEigenvectorDictionary:
+                if key in state_dict['jacobianLipschitzEigenvectorDictionary']:
+                    self.jacobianLipschitzEigenvectorDictionary[key] = \
+                        state_dict['jacobianLipschitzEigenvectorDictionary'][key]
+                elif not warned:
+                    warnings.warn("Some jacobian lipschitz eigenvectors were not loaded. They were not found in the state dictionary "
+                                  "and will be initialized randomly.\n"
+                                  "It is best to set the number of power iterations"
+                                  " to a higher number to achieve more accurate results if needed.")
+                    warned = True
             if not self.singleFullyConnected:
                 self.gwEigen = state_dict['gwEigen']
                 self.aEigen = state_dict['aEigen']
@@ -187,6 +203,7 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
     def createDictionaries(self, shapes, flattenIndex, flattenLayer):
         for i in range(len(self.indexMap)):
             self.createEigenvectorAndSubNetwork(i, i, shapes, flattenIndex, flattenLayer)
+            self.jacobianLipschitzEigenvectorDictionary[(i, i)] = torch.randn_like(self.eigenVectorDictionary[(i, i)])
         if not self.singleFullyConnected:
             self.aEigen = torch.randn(shapes[-1]).to(self.device)
             self.gwEigen = torch.randn(shapes[-2]).to(self.device)
@@ -278,6 +295,22 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
                 x = x / norm
             self.eigenVectorDictionary[(startIndex, endIndex)] = x
 
+        for startIndex in range(len(self.indexMap)):
+            x = self.jacobianLipschitzEigenvectorDictionary[(startIndex, startIndex)]
+            currentLayer = self.subNetworkDictionary[(startIndex, startIndex)]
+            if isinstance(currentLayer[0], nn.modules.linear.Linear):
+                layerRowTwoNorm = torch.linalg.norm(currentLayer[0].weight, 2, 1).unsqueeze(0)
+            else:
+                layerRowTwoNorm = torch.linalg.norm(currentLayer[0].weight.flatten(1), 2, 1).view(1, -1, 1, 1)
+
+            for i in range(self.numberOfPowerIterations):
+                x = self.forwardOnLayers(x, currentLayer)
+                x = layerRowTwoNorm ** 2 * x
+                x = self.backwardOnLayers(x, currentLayer)
+                norm = torch.linalg.norm(x, None, None)
+                x = x / norm
+            self.jacobianLipschitzEigenvectorDictionary[(startIndex, startIndex)] = x
+
     def calculateSubNetNaiveLipschitz(self, x, startIndex, endIndex, numberOfPowerIterations, k=None, j=None):
         if k is None:
             layers = self.subNetworkDictionary[(startIndex, endIndex)]
@@ -353,8 +386,31 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
             if returnAll:
                 return layerLipschitzs
             return currentLipschitz
-        
-    
+
+
+    def calculateLayerJacobianLipschitz(self):
+
+        jacobianLipschitz = []
+        for startIndex in range(len(self.indexMap) - 1):
+            x = self.jacobianLipschitzEigenvectorDictionary[(startIndex, startIndex)]
+            currentLayer = self.subNetworkDictionary[(startIndex, startIndex)]
+            if isinstance(currentLayer[0], nn.modules.linear.Linear):
+                layerRowTwoNorm = torch.linalg.norm(currentLayer[0].weight, 2, 1).unsqueeze(0)
+            else:
+                layerRowTwoNorm = torch.linalg.norm(currentLayer[0].weight.flatten(1), 2, 1).view(1, -1, 1, 1)
+
+            for i in range(self.numberOfPowerIterations):
+                x = self.forwardOnLayers(x, currentLayer)
+                x = layerRowTwoNorm ** 2 * x
+                x = self.backwardOnLayers(x, currentLayer)
+                norm = torch.linalg.norm(x, None, None)
+                x = x / norm
+            self.jacobianLipschitzEigenvectorDictionary[(startIndex, startIndex)] = x
+            x = self.forwardOnLayers(x, currentLayer)
+            x = layerRowTwoNorm * x
+            jacobianLipschitz.append(self.getActivationCurvature(self.layers[self.indexMap[startIndex] + 1])
+                                     * torch.linalg.norm(x.flatten(), 2))
+        return jacobianLipschitz
 
     @staticmethod
     def createPairwiseLipschitzFromLipschitz(lipschitzConstants, numberOfClasses, selfPairDefaultValue=0):
@@ -665,9 +721,9 @@ class SequentialLipltLipschitz(SequentialNaiveLipschitz):
                 maximumCurvature *= activationLayer.beta
         return maximumCurvature
 
-
     def calculateCurvature(self, queryCoefficient=None, localPoints=None, returnAll=False, anchorDerivativeTerm=False):
         individualLayerLipschitzs = super().calculateNetworkLipschitz(returnAll=True)
+        jacobianLipschitzs = self.calculateLayerJacobianLipschitz()
         with torch.no_grad():
             self.applyPowerIteration()
         ms = [1] + self.calculateSubNetsImprovedLipschitz()
@@ -682,12 +738,15 @@ class SequentialLipltLipschitz(SequentialNaiveLipschitz):
             layerLipschitz = individualLayerLipschitzs[i]
             currentLayer = self.layers[self.indexMap[i]]
 
-            if isinstance(currentLayer, nn.modules.linear.Linear):
-                layerRowTwoNorm = torch.linalg.norm(currentLayer.weight, 2, 1)
-            else:
-                layerRowTwoNorm = torch.linalg.norm(currentLayer.weight.flatten(1), 2, 1)
-            layerJacobianLipschitz = (self.getActivationCurvature(self.layers[self.indexMap[i] + 1])
-                                      * torch.max(layerRowTwoNorm) * layerLipschitz)
+            # if isinstance(currentLayer, nn.modules.linear.Linear):
+            #     layerRowTwoNorm = torch.linalg.norm(currentLayer.weight, 2, 1)
+            # else:
+            #     layerRowTwoNorm = torch.linalg.norm(currentLayer.weight.flatten(1), 2, 1)
+            # prevJacobianLipschitz = (self.getActivationCurvature(self.layers[self.indexMap[i] + 1])
+            #                           * torch.max(layerRowTwoNorm) * layerLipschitz)
+
+            layerJacobianLipschitz = jacobianLipschitzs[i]
+            # print(layerJacobianLipschitz / prevJacobianLipschitz)
 
             curvature = layerJacobianLipschitz * lipschitzTillHere ** 2 + layerLipschitz * curvature
             allCurvatures.append(curvature)

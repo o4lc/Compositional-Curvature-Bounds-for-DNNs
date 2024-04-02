@@ -373,12 +373,16 @@ def createLipLtModel(networkConfiguration, device):
     if activation is not None:
         layers.pop()
     if networkConfiguration['modelType'] == "naive":
-        net = SequentialNaiveLipschitz(layers, networkConfiguration['inputShape'], device,
-                                       networkConfiguration['perClassLipschitz'],
-                                       networkConfiguration['numberOfPowerIterations'],
-                                       networkConfiguration['weightInitialization'],
-                                       networkConfiguration['pairwiseLipschitz'],
-                                       activation)
+        raise NotImplementedError("The current code base does not support this option."
+                                  " If you want to use naive Lipschitz networks,"
+                                  " please use the original codebase of CRM or modify this codebase accordingly. "
+                                  "You just need to implement one function, I think, to calculate the curvature.")
+        # net = SequentialNaiveLipschitz(layers, networkConfiguration['inputShape'], device,
+        #                                networkConfiguration['perClassLipschitz'],
+        #                                networkConfiguration['numberOfPowerIterations'],
+        #                                networkConfiguration['weightInitialization'],
+        #                                networkConfiguration['pairwiseLipschitz'],
+        #                                activation)
     elif networkConfiguration['modelType'] == "liplt":
         net = SequentialLipltLipschitz(layers, networkConfiguration['inputShape'], device,
                                        networkConfiguration['perClassLipschitz'],

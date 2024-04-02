@@ -18,6 +18,7 @@ from torch.optim import lr_scheduler
 # from autoattack import AutoAttack
 # import pytorch_warmup as warmup
 from torch.autograd.functional import hessian
+from core.bisectionSolver import createSlopeDictionary
 
 
 def get_epochs_from_ckpt(filename):
@@ -280,3 +281,37 @@ def stackIfNonempty(x, dim=0):
     if len(x) == 0:
         return x
     return torch.cat(x, dim=dim)
+
+
+class SlopeDictionary:
+
+    def __init__(self, activationFunction):
+        if "softplus" in activationFunction.lower():
+            activationFunction = "softplus"
+        self.betaDictionary, self.betaPrimeDictionary, maximumValue = createSlopeDictionary(activationFunction)
+        self.maximumValue = torch.tensor(maximumValue)
+
+
+    @staticmethod
+    def readFromDictionary(dictionary, points, maximumValue):
+
+        xx = [round(y, 2) for y in torch.minimum(torch.abs(points), maximumValue).flatten().tolist()]
+        slopes = []
+        for anchorPoint in xx:
+            slopes.append(dictionary[anchorPoint])
+        # print(anchorPoint, max(slopes))
+        results = torch.tensor(slopes).reshape(points.shape).to(points.device).to(points.dtype)
+        assert not torch.any(results < dictionary[round(maximumValue.item(), 2)])
+        return results
+
+    def getBeta(self, x):
+        return SlopeDictionary.readFromDictionary(self.betaDictionary, x, self.maximumValue)
+
+
+    def getBetaPrime(self, x):
+        return SlopeDictionary.readFromDictionary(self.betaPrimeDictionary, x, self.maximumValue)
+
+    @staticmethod
+    def multiplyDictionary(dictionary, multiplier):
+        for key in dictionary.keys():
+            dictionary[key] *= multiplier
