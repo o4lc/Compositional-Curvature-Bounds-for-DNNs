@@ -149,7 +149,7 @@ if __name__ == '__main__':
         config.networkConfiguration = {"perClassLipschitz": False,
                                        "activation": config.activation,
                                        'learnableBeta': config.learnableBeta,
-                                       "numberOfPowerIterations": 5,
+                                       "numberOfPowerIterations": 2,
                                        "inputShape": inputShape,
                                        "modelType": "liplt",
                                        'layers': getNetworkArchitecture(config.model_name[6:]),

@@ -113,6 +113,7 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
         self.perClassLipschitz = perClassLipschitz
         self.pairwiseLipschitz = pairwiseLipschitz
         self.numberOfPowerIterations = numberOfPowerIterations
+        self.evaluationNumberOfPowerIterations = numberOfPowerIterations
         self.device = device
         self.layers = layers
         self.shapes = []
@@ -296,20 +297,8 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
             self.eigenVectorDictionary[(startIndex, endIndex)] = x
 
         for startIndex in range(len(self.indexMap)):
-            x = self.jacobianLipschitzEigenvectorDictionary[(startIndex, startIndex)]
-            currentLayer = self.subNetworkDictionary[(startIndex, startIndex)]
-            if isinstance(currentLayer[0], nn.modules.linear.Linear):
-                layerRowTwoNorm = torch.linalg.norm(currentLayer[0].weight, 2, 1).unsqueeze(0)
-            else:
-                layerRowTwoNorm = torch.linalg.norm(currentLayer[0].weight.flatten(1), 2, 1).view(1, -1, 1, 1)
+            self.jacobianLipschitzPowerIteration(startIndex)
 
-            for i in range(self.numberOfPowerIterations):
-                x = self.forwardOnLayers(x, currentLayer)
-                x = layerRowTwoNorm ** 2 * x
-                x = self.backwardOnLayers(x, currentLayer)
-                norm = torch.linalg.norm(x, None, None)
-                x = x / norm
-            self.jacobianLipschitzEigenvectorDictionary[(startIndex, startIndex)] = x
 
     def calculateSubNetNaiveLipschitz(self, x, startIndex, endIndex, numberOfPowerIterations, k=None, j=None):
         if k is None:
@@ -387,13 +376,9 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
                 return layerLipschitzs
             return currentLipschitz
 
-
-    def calculateLayerJacobianLipschitz(self, layerIndex, localPoints=None):
+    def jacobianLipschitzPowerIteration(self, layerIndex):
         x = self.jacobianLipschitzEigenvectorDictionary[(layerIndex, layerIndex)]
-        if localPoints is not None:
-            prevIndex = max(self.indexMap[layerIndex] - 1, 0)
-            newLocalPoints = self.linear[prevIndex: self.indexMap[layerIndex] + 1](localPoints)
-            betaPrimes = self.slopeDictionary.getBetaPrime(newLocalPoints)
+
         currentLayer = self.subNetworkDictionary[(layerIndex, layerIndex)]
         if isinstance(currentLayer[0], nn.modules.linear.Linear):
             layerRowTwoNorm = torch.linalg.norm(currentLayer[0].weight, 2, 1).unsqueeze(0)
@@ -407,13 +392,22 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
             norm = torch.linalg.norm(x, None, None)
             x = x / norm
         self.jacobianLipschitzEigenvectorDictionary[(layerIndex, layerIndex)] = x
+        return currentLayer, layerRowTwoNorm
+
+    def calculateLayerJacobianLipschitz(self, layerIndex, localPoints=None):
+        currentLayer, layerRowTwoNorm = self.jacobianLipschitzPowerIteration(layerIndex)
+        x = self.jacobianLipschitzEigenvectorDictionary[(layerIndex, layerIndex)]
 
         if localPoints is not None:
+            prevIndex = max(self.indexMap[layerIndex] - 1, 0)
+            localPoints = self.linear[prevIndex: self.indexMap[layerIndex] + 1](localPoints)
+            betaPrimes = self.slopeDictionary.getBetaPrime(localPoints)
+
             # now power iterate with beta prime included
-            for i in range(self.numberOfPowerIterations + 2):
+            for i in range(self.evaluationNumberOfPowerIterations):
                 x = self.forwardOnLayers(x, currentLayer)
                 x = layerRowTwoNorm ** 2 * x
-                print(betaPrimes.shape, layerRowTwoNorm.shape, x.shape)
+                # print(betaPrimes.shape, layerRowTwoNorm.shape, x.shape)
                 x = betaPrimes ** 2 * x
                 x = self.backwardOnLayers(x, currentLayer)
                 norm = torch.linalg.norm(x.flatten(1), 2, 1)
@@ -424,7 +418,7 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
         x = layerRowTwoNorm * x
         if localPoints is not None:
             x = betaPrimes * x
-            jacobianLipschitz = torch.linalg.norm(x.flatten(1), 2)
+            jacobianLipschitz = torch.linalg.norm(x.flatten(1), 2, 1, keepdim=True)
         else:
             jacobianLipschitz = self.getActivationCurvature(self.layers[self.indexMap[layerIndex] + 1]) * torch.linalg.norm(x.flatten(), 2)
         return jacobianLipschitz, localPoints
@@ -450,6 +444,8 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
     def miniBatchStep(self):  # required to run after every loss.backward()
         for key in self.eigenVectorDictionary:
             self.eigenVectorDictionary[key].detach_()
+        for key in self.jacobianLipschitzEigenvectorDictionary:
+            self.jacobianLipschitzEigenvectorDictionary[key].detach_()
 
     def calculateLargeClassLipschitzConstant(self, lipschitzUntilPenultimate, selfPairDefaultValue=0):
         rangeIterator = range(self.numberOfClasses)
@@ -467,7 +463,8 @@ class SequentialNaiveLipschitz(SequentialLipschitzNetwork):
         return pairWiseLipschitzConstants
 
     def converge(self):
-        self.applyPowerIteration()
+        for _ in range(20):
+            self.applyPowerIteration()
 
 class SequentialLipltLipschitz(SequentialNaiveLipschitz):
     def __init__(self, layers, sampleInputShape, device=torch.device("cuda"), perClassLipschitz=True,
@@ -595,7 +592,6 @@ class SequentialLipltLipschitz(SequentialNaiveLipschitz):
 
     def applyPowerIteration(self):
         for _ in range(self.numberOfPowerIterations):
-
             appliedFlatten = False
             previousX = None
             remainingXs = []
@@ -752,8 +748,8 @@ class SequentialLipltLipschitz(SequentialNaiveLipschitz):
         for i in range(len(self.indexMap) - offset):
             lipschitzTillHere = ms[i]
             layerLipschitz = individualLayerLipschitzs[i]
-            currentLayer = self.layers[self.indexMap[i]]
 
+            # currentLayer = self.layers[self.indexMap[i]]
             # if isinstance(currentLayer, nn.modules.linear.Linear):
             #     layerRowTwoNorm = torch.linalg.norm(currentLayer.weight, 2, 1)
             # else:
@@ -763,10 +759,12 @@ class SequentialLipltLipschitz(SequentialNaiveLipschitz):
 
             layerJacobianLipschitz, localPoints = self.calculateLayerJacobianLipschitz(i, localPoints)
             # print(layerJacobianLipschitz / prevJacobianLipschitz)
+            # print(i, layerJacobianLipschitz, prevJacobianLipschitz)
+
 
             curvature = layerJacobianLipschitz * lipschitzTillHere ** 2 + layerLipschitz * curvature
             allCurvatures.append(curvature)
-
+        # raise
         if self.singleFullyConnected:
             curvature = individualLayerLipschitzs[-1] * curvature
         else:
@@ -793,8 +791,8 @@ class SequentialLipltLipschitz(SequentialNaiveLipschitz):
         return curvature
 
     def converge(self):
-        for _ in range(10):
-            super().applyPowerIteration()
+        super().converge()
+        for _ in range(20):
             self.applyPowerIteration()
 
     def calculateHessian(self, queryCoefficient, method='naive'):

@@ -88,19 +88,23 @@ class Evaluator:
 
         # load model
         self.model = lipschitzModel(self.config, self.reader.n_classes, activation=self.config.activation)
+
         self.model = NormalizedModel(self.model, self.reader.means, self.reader.stds)
         self.model = torch.nn.DataParallel(self.model)
         self.model = self.model.cuda()
 
         self.load_ckpt()
 
-        for i in range(100):  # converge for power iteration
-            with torch.no_grad():
-                self.model.module.model.converge()
-            # if self.config.model_name.startswith("liplt"):
-            #     self.model.module.model.calculateNetworkLipschitz()
-            # if isDifferentiable(self.model):
-            #     self.model.module.model.calculateCurvature()
+        # converge for power iteration
+        with torch.no_grad():
+            self.model.module.model.converge()
+        # if self.config.model_name.startswith("liplt"):
+        #     self.model.module.model.calculateNetworkLipschitz()
+        # if isDifferentiable(self.model):
+        #     self.model.module.model.calculateCurvature()
+        if self.config.model_name.startswith("liplt"):
+            self.model.module.model.numberOfPowerIterations = 1
+            self.model.module.model.evaluationNumberOfPowerIterations = 20
 
         if isinstance(self.model.module.model, SllNetwork):
             lipschitzConstant = 1.

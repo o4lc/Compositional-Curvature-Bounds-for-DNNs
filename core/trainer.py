@@ -226,9 +226,9 @@ class Trainer:
                     self._print_approximated_train_time(start_time)
                 global_step += 1
 
-            for _ in range(100):
-                with torch.no_grad():  # this step is for the convergence of the power iteration method.
-                    self.model.module.model.converge()
+
+            with torch.no_grad():  # this step is for the convergence of the power iteration method.
+                self.model.module.model.converge()
 
         self._save_ckpt(global_step, epoch_id, final=True)
         logging.info("Done training -- epoch limit reached.")
