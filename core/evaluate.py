@@ -109,7 +109,8 @@ class Evaluator:
         if isinstance(self.model.module.model, SllNetwork):
             lipschitzConstant = 1.
         elif isinstance(self.model.module.model, SequentialLipschitzNetwork):
-            lipschitzConstant = self.model.module.model.calculateNetworkLipschitz()
+            with torch.no_grad():
+                lipschitzConstant = self.model.module.model.calculateNetworkLipschitz()
         else:
             raise ValueError
 
@@ -414,17 +415,18 @@ class Evaluator:
         # shifts the mean and does not alter the variance.
         anchorDerivativeTerm = False
         returnAll = True
-        if useQueryCoefficients:
-            M, allActiveCurvatures =\
-                self.model.module.model.calculateCurvature(queryCoefficient,
-                                                           localPoints=normalizedInputs,
-                                                           returnAll=returnAll,
-                                                           anchorDerivativeTerm=anchorDerivativeTerm)
-        else:
-            M, allActiveCurvatures =\
-                self.model.module.model.calculateCurvature(localPoints=normalizedInputs,
-                                                           returnAll=returnAll,
-                                                           anchorDerivativeTerm=anchorDerivativeTerm)
+        with torch.no_grad():
+            if useQueryCoefficients:
+                M, allActiveCurvatures =\
+                    self.model.module.model.calculateCurvature(queryCoefficient,
+                                                               localPoints=normalizedInputs,
+                                                               returnAll=returnAll,
+                                                               anchorDerivativeTerm=anchorDerivativeTerm)
+            else:
+                M, allActiveCurvatures =\
+                    self.model.module.model.calculateCurvature(localPoints=normalizedInputs,
+                                                               returnAll=returnAll,
+                                                               anchorDerivativeTerm=anchorDerivativeTerm)
         if M.shape != grad_norm.shape:
             M = M * torch.ones_like(grad_norm)
         if True:
