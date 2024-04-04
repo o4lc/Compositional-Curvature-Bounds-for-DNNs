@@ -23,11 +23,11 @@ dir="$dataset/$model_name$name"
 activation=tanh
 
 CUDA_VISIBLE_DEVICES=$gpu torchrun --standalone --nnodes=1 --nproc_per_node=gpu main.py --dataset $dataset\
-                --model-name $model_name --train_dir $dir --epochs 1000 --batch_size 256 --activation $activation\
-                --scheduler cosine --lr 0.0001 --save_checkpoint_epochs 10\
+                --model-name $model_name --train_dir $dir --epochs 200 --batch_size 256 --activation $activation\
+                --scheduler cosine --lr 0.0001 --save_checkpoint_epochs 50\
                 --offset 0. --temperature 0.25 --penalizeCurvature --hessianRegularizerCoefficient 0.1\
-                 --hessianRegularizerPrimalDualStepSize 0.05 --hessianRegularizerMinimumCoefficient 0.0001\
-                 --hessianRegularizerPrimalDualEpsilon 0.6
+                 --hessianRegularizerPrimalDualStepSize 0.005 --hessianRegularizerMinimumCoefficient 0.0001\
+                 --hessianRegularizerPrimalDualEpsilon 0.55
 
 
 #dataset=cifar100
