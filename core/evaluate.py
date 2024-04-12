@@ -118,8 +118,9 @@ class Evaluator:
         secondOrderCertificates = True
         if self.config.mode == "certified":
             # self.eval_certified_plot(eps=36/255)
+            a  = time.time()
             accuracy, cert_rad, lip_cert_rad, curv_cert_rad, grad_norm, margins, corrects, M = self.evaluate_certified_radius()
-
+            print('---', time.time() - a)
             # print(M.shape, grad_norm.shape, margins.shape, cert_rad.shape)
             # raise
             if len(M) == 0:
@@ -130,14 +131,19 @@ class Evaluator:
                 epss = [403]
 
             if self.config.newtonStep:
+                a = time.time()
                 M = self.model.module.model.calculateCurvature()
                 while len(M.shape) < 2:
                     M = M.unsqueeze(0)
                 data_loader, _ = self.reader.load_dataset()
                 M = M.repeat(data_loader.dataset.__len__(), 1)
                 curv_cert_rad_tmp = self.newton_cert_rad(M).unsqueeze(1)
+                torch.save(curv_cert_rad, 'secondOrder.pth')
                 curv_cert_rad = torch.maximum(curv_cert_rad, curv_cert_rad_tmp)
                 cert_rad = torch.maximum(cert_rad, curv_cert_rad)
+                print('---', time.time() - a)
+
+                torch.save(curv_cert_rad_tmp, 'newton.pth')
 
             for eps in epss:
                 eps_float = eps / 255
@@ -172,6 +178,7 @@ class Evaluator:
                 if secondOrderCertificates:
                     assert lip_cert_acc_imp >= lip_cert_acc
                     assert lip_cert_acc_imp + curv_cert_acc >= cert_acc
+
 
             # for eps in [36, 72, 108, 255]:
             #     if self.config.last_layer == 'lln':
@@ -832,7 +839,7 @@ def newton_step_cert(x0, true_label, false_target, model, M, verbose=True):
 
         x = x0.clone()
         outer_iters = 20
-        inner_iters = 20
+        inner_iters = 30
         for i in range(outer_iters):
             for j in range(inner_iters):
                 g_batch = jacobian(grad_f, x).reshape(x0.shape)

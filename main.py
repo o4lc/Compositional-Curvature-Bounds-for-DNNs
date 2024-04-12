@@ -11,6 +11,7 @@ from core.trainer import Trainer
 from core.evaluate import Evaluator
 from core.models.lipltArchitectures import getNetworkArchitecture
 
+
 warnings.filterwarnings("ignore")
 
 
@@ -109,6 +110,7 @@ if __name__ == '__main__':
     # parse all arguments
     config = parser.parse_args()
     config.cmd = f"python3 {' '.join(sys.argv)}"
+
 
 
     def override_args(config, depth, num_channels, depth_linear, n_features):
