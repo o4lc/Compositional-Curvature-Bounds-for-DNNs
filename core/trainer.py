@@ -28,6 +28,13 @@ from torch.distributed.elastic.multiprocessing.errors import record
 import wandb
 
 
+def init_seeds(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
 
 class Trainer:
     """A Trainer to train a PyTorch."""
@@ -36,6 +43,7 @@ class Trainer:
         wandb.init(project="secondOrderRobustness", entity="limitlessInfinite", config=config)
         self.config = config
         self.config.mode = "certified"
+        init_seeds(config.seed)
         self.evaluate = Evaluator(self.config, wandb=True)
 
         self.regularizerCoefficient = config.hessianRegularizerCoefficient
