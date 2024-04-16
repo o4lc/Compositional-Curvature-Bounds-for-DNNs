@@ -118,32 +118,29 @@ class Evaluator:
         secondOrderCertificates = True
         if self.config.mode == "certified":
             # self.eval_certified_plot(eps=36/255)
-            a  = time.time()
             accuracy, cert_rad, lip_cert_rad, curv_cert_rad, grad_norm, margins, corrects, M = self.evaluate_certified_radius()
-            print('---', time.time() - a)
-            # print(M.shape, grad_norm.shape, margins.shape, cert_rad.shape)
-            # raise
+
+            if self.config.plot:
+                # Plots Lipschitz Certs vs Curvature Certs
+                plotLipCurvCompare(lip_cert_rad, curv_cert_rad)
+
             if len(M) == 0:
                 secondOrderCertificates = False
-            # secondOrderCertificates = False
             epss = [36, 72, 108, 255]
             if self.config.dataset == 'mnist':
                 epss = [403]
 
             if self.config.newtonStep:
-                a = time.time()
                 M = self.model.module.model.calculateCurvature()
                 while len(M.shape) < 2:
                     M = M.unsqueeze(0)
                 data_loader, _ = self.reader.load_dataset()
                 M = M.repeat(data_loader.dataset.__len__(), 1)
                 curv_cert_rad_tmp = self.newton_cert_rad(M).unsqueeze(1)
-                torch.save(curv_cert_rad, 'secondOrder.pth')
+                torch.save(curv_cert_rad, 'plots/secondOrder.pth')
                 curv_cert_rad = torch.maximum(curv_cert_rad, curv_cert_rad_tmp)
                 cert_rad = torch.maximum(cert_rad, curv_cert_rad)
-                print('---', time.time() - a)
-
-                torch.save(curv_cert_rad_tmp, 'newton.pth')
+                torch.save(curv_cert_rad_tmp, 'plots/newton.pth')
 
             for eps in epss:
                 eps_float = eps / 255
@@ -282,7 +279,7 @@ class Evaluator:
         uncertAcc = torch.vstack(uncertAcc)
         plt.hist(uncertRad.detach().cpu().numpy(), bins=20)
         plt.xlabel('Attack Radius')
-        plt.savefig('attack_radius.pdf')
+        plt.savefig('plots/attack_radius.pdf')
         plt.show()
 
         accuracy = running_accuracy / running_inputs
@@ -1000,4 +997,24 @@ def measure_curvature(model: torch.nn.Module,
             print('Maximum M:', maximumM)
             return maxCurvature, maxHessian
         
+
+def plotLipCurvCompare(lip_cert_rad, curv_cert_rad):
+    bins = np.arange(0, 1.8, 0.05)
+    plt.hist(lip_cert_rad[lip_cert_rad > 0].cpu().numpy(), bins=bins, alpha = 1, label='Lipschitz Certificates')
+    plt.hist(curv_cert_rad[curv_cert_rad > 0].cpu().numpy(), bins=bins, alpha = 0.8, label='Curvature, Certificates')
+    plt.xlabel('Certified Radius')
+    plt.legend()
+    plt.savefig('plots/curvLipComparison.pdf')
+    plt.show(block=False)
+    plt.pause(1)
+    plt.close()
+
+    bins = np.arange(0, 1, 0.02)
+    diff = curv_cert_rad[curv_cert_rad > 0].cpu().numpy() - lip_cert_rad[lip_cert_rad > 0].cpu().numpy()
+    plt.hist(diff, bins=bins)
+    plt.xlabel('Radius Difference')
+    plt.savefig('plots/curvLipComparison2.pdf')
+    plt.show(block=False)
+    plt.pause(1)
+    plt.close()
 

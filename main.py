@@ -106,6 +106,8 @@ if __name__ == '__main__':
     parser.add_argument("--checkpointPath", type=str, help="Full path to the checkpoint")
     parser.add_argument("--penalizeHessian", action="store_true")
 
+    parser.add_argument("--plot", action="store_true")
+
 
     # parse all arguments
     config = parser.parse_args()

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-gpu=1
+gpu=0
 
 #
 #dataset=mnist
@@ -18,7 +18,7 @@ gpu=1
 
 dataset=cifar10
 model_name=liplt-6F
-name=finaltest6F
+name=finaltest6Fs2
 dir="$dataset/$model_name$name"
 activation=tanh
 
@@ -90,8 +90,8 @@ activation=tanh
 # CUDA_VISIBLE_DEVICES=$gpu python3 main.py --mode certified_attack --dataset $dataset --model-name $model_name\
 #              --train_dir $dir --activation $activation
 
-CUDA_VISIBLE_DEVICES=$gpu python3 main.py --mode attack --dataset $dataset --model-name $model_name\
-           --train_dir $dir --activation $activation
+# CUDA_VISIBLE_DEVICES=$gpu python3 main.py --mode attack --dataset $dataset --model-name $model_name\
+#            --train_dir $dir --activation $activation
 #
 CUDA_VISIBLE_DEVICES=$gpu python3 main.py --mode certified --dataset $dataset --model-name $model_name\
-           --train_dir $dir --activation $activation --newtonStep
+           --train_dir $dir --activation $activation --newtonStep --plot
