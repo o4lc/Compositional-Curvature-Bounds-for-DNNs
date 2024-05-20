@@ -53,6 +53,11 @@ class Trainer:
         self.accuracyMovingAverage = 0
         self.movingAverageFactor = config.accuracyEmaFactor
 
+        torch.manual_seed(config.seed)
+        np.random.seed(config.seed)
+        torch.cuda.manual_seed_all(config.seed)
+        random.seed(config.seed)
+
 
     def _load_state(self):
         # load last checkpoint
