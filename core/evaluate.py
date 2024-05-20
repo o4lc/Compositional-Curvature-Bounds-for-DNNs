@@ -1000,15 +1000,17 @@ def measure_curvature(model: torch.nn.Module,
 
 def plotLipCurvCompare(lip_cert_rad, curv_cert_rad):
     bins = np.arange(0, 1.8, 0.05)
+    plt.figure(figsize=(12, 4))
+    plt.subplot(1, 2, 2)
     plt.hist(lip_cert_rad[lip_cert_rad > 0].cpu().numpy(), bins=bins, alpha = 1, label='Lipschitz Certificates')
-    plt.hist(curv_cert_rad[curv_cert_rad > 0].cpu().numpy(), bins=bins, alpha = 0.8, label='Curvature, Certificates')
+    plt.hist(curv_cert_rad[curv_cert_rad > 0].cpu().numpy(), bins=bins, alpha = 0.8, label='Curvature Certificates')
     plt.xlabel('Certified Radius')
     plt.legend()
-    plt.savefig('plots/curvLipComparison.pdf')
-    plt.show(block=False)
-    plt.pause(1)
-    plt.close()
-
+    # plt.savefig('plots/curvLipComparison.pdf')
+    # plt.show(block=False)
+    # plt.pause(1)
+    # plt.close()
+    plt.subplot(1, 2, 1)
     bins = np.arange(0, 1, 0.02)
     diff = curv_cert_rad[curv_cert_rad > 0].cpu().numpy() - lip_cert_rad[lip_cert_rad > 0].cpu().numpy()
     plt.hist(diff, bins=bins)
