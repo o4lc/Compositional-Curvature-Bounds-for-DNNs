@@ -1,5 +1,8 @@
 #!/bin/bash
 
+
+## this file contains many run examples that were perhaps for test purposes. Do not use this file for running the code.
+
 gpu=0
 
 #

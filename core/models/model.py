@@ -59,7 +59,7 @@ class SllNetwork(nn.Module):
 
         for _ in range(self.depth):
             layers.append(block_conv(config, (1, self.num_channels, imsize, imsize), self.num_channels, self.conv_size,
-                                     activation=activation, cpl=config.cpl))
+                                     activation=activation))
 
         layers.append(nn.AvgPool2d(4, divisor_override=4))
         self.stable_block = nn.Sequential(*layers)
@@ -74,7 +74,7 @@ class SllNetwork(nn.Module):
             in_channels = self.num_channels * 16 * 16
 
         for _ in range(self.depth_linear):
-            layers_linear.append(block_lin(config, in_channels, self.n_features, activation=activation, cpl=config.cpl))
+            layers_linear.append(block_lin(config, in_channels, self.n_features, activation=activation))
 
         if config.last_layer == 'pooling_linear':
             self.last_last = PoolingLinear(in_channels, self.n_classes, agg="trunc")

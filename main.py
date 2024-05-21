@@ -65,7 +65,7 @@ if __name__ == '__main__':
     parser.add_argument("--logging_verbosity", type=str, default='INFO', help="Level of verbosity of the logs")
     parser.add_argument("--save_checkpoint_epochs", type=int, default=25, help="Save checkpoint every epoch.")
 
-    parser.add_argument("--activation", type=str, default='relu', choices=['relu', 'tanh',
+    parser.add_argument("--activation", type=str, default='tanh', choices=['relu', 'tanh',
                                                                            'softplus', 'centered_softplus'])
     parser.add_argument("--penalizeCurvature", action='store_true')
     parser.add_argument("--boundCurvature", action='store_true')
@@ -94,17 +94,15 @@ if __name__ == '__main__':
     parser.add_argument("--n_features", type=int, default=2048)
     parser.add_argument("--conv_size", type=int, default=5)
     parser.add_argument("--init", type=str, default='xavier_normal')
-
     parser.add_argument("--first_layer", type=str, default="padding_channels")
     parser.add_argument("--last_layer", type=str, default="pooling_linear")
-    parser.add_argument("--cpl", action="store_true")
+
     parser.add_argument("--crm", action="store_true")
     parser.add_argument("--learnableBeta", action="store_true",
                         help="Learnable beta for the softplus "
                              "activation. Currently only supported for liplt architectures")
     parser.add_argument("--loadCheckpoint", action="store_true")
     parser.add_argument("--checkpointPath", type=str, help="Full path to the checkpoint")
-    parser.add_argument("--penalizeHessian", action="store_true")
 
     parser.add_argument("--plot", action="store_true")
 

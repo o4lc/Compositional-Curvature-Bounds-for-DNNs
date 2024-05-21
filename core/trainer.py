@@ -332,30 +332,10 @@ class Trainer:
             if modelLipschitz < minimumLipschitz:
                 lipschitzToUse = modelLipschitz.detach().clone()
             self.criterion.offset = self.config.offset * lipschitzToUse
-        # if self.config.dynamicOffset:
-        #     self.accuracyMovingAverage = (self.movingAverageFactor * accuracy +
-        #                                   (1 - self.movingAverageFactor) * self.accuracyMovingAverage)
-        #
-        #     self.regularizerCoefficient = (
-        #         max(self.regularizerCoefficient +
-        #             (self.accuracyMovingAverage - self.pdEpsilon) * self.regularizerStepSize,
-        #             self.minimumRegularizerCoefficient))
-        #     if modelLipschitz < self.config.minimumLipschitz:
-        #         valueForOffset = modelLipschitz.detach().clone()
-        #     else:
-        #         valueForOffset = modelLipschitz
-        #     self.criterion.offset = valueForOffset * self.config.offset * self.regularizerCoefficient
-        #     # self.criterion.offset =\
-        #     #     (torch.maximum(modelLipschitz, torch.tensor([self.config.minimumLipschitz]).to(modelLipschitz))
-        #     #      * self.config.offset * self.regularizerCoefficient)
-        #     wandb.log({"Regularizer Coefficient": self.regularizerCoefficient,
-        #                "moving average accuracy": self.accuracyMovingAverage,
-        #                "criterion offset": self.criterion.offset.item()})
 
         loss = self.criterion(outputs, labels)
         wandb.log({"xent loss": loss.item(),
                    "lr": self.optimizer.param_groups[0]['lr']})
-
 
         wandb.log({"Curvature Bound": modelCurvature.item(), "accuracy": accuracy,})
         if self.config.penalizeCurvature:
@@ -378,24 +358,7 @@ class Trainer:
             loss += self.regularizerCoefficient * modelCurvature
             wandb.log({"Regularizer Coefficient": self.regularizerCoefficient,
                        "total loss": loss.item(), })
-        elif self.config.penalizeHessian:
-            hessian = torch.autograd.functional.hessian(lambda x: self.model(x).mean(), images)
-            hessian = hessian.view(thisBatchSize, -1)
-            hessian = torch.norm(hessian, p=2, dim=1)
-            loss += self.regularizerCoefficient * hessian.mean()
-            wandb.log({"Hessian Norm": hessian.mean().item(),
-                       "total loss": loss.item(), })
-        # elif self.config.crm:
-            # margins = outputs[range(thisBatchSize), maxIndices].unsqueeze(1) - outputs
-            # if isinstance(self.model, nn.DataParallel):
-            #     lipschitzConstants = self.model.module.model.calculateNetworkLipschitz(selfPairDefaultValue=1)
-            #     pairWiseLipschitzConstants =\
-            #         self.model.module.model.createPairwiseLipschitzFromLipschitz(lipschitzConstants, numberOfClasses, 1)
-            # else:
-            #     raise NotImplementedError
-            #
-            # certifiedRadii = margins / pairWiseLipschitzConstants[maxIndices, :]
-            # certifiedRadii[range(thisBatchSize), maxIndices] = torch.inf
+
         loss.backward()
         self.process_gradients(step)
         self.optimizer.step()

@@ -16,7 +16,7 @@ def normalize(input):
 
 class SDPBasedLipschitzConvLayer(nn.Module):
 
-    def __init__(self, config, input_size, cin, cout, kernel_size=3, epsilon=1e-6, activation='relu', cpl=False):
+    def __init__(self, config, input_size, cin, cout, kernel_size=3, epsilon=1e-6, activation='relu'):
         super(SDPBasedLipschitzConvLayer, self).__init__()
 
         self.slopeDictionary = SlopeDictionary(activation)
@@ -57,25 +57,18 @@ class SDPBasedLipschitzConvLayer(nn.Module):
         self.gEigen = \
           nn.Parameter(normalize(F.conv2d(torch.randn(input_size), self.kernel, padding=1).detach().clone()),
                        requires_grad=False)
-        self.cpl = cpl
 
     def computeT(self):
-        if self.cpl:
-            with torch.no_grad():
-                self.wEigen.data = \
-                    normalize(F.conv_transpose2d(F.conv2d(self.wEigen, self.kernel, padding=1), self.kernel, padding=1))
-            T = torch.linalg.norm(F.conv2d(self.wEigen, self.kernel, padding=1).flatten(), 2) ** 2
-        else:
-            method = "abs"
-            if method == "abs":
-                q = torch.abs(self.q)[None, :, None, None]
-                qInv = 1 / torch.abs(self.q)
-            elif method == "exp":
-                q = torch.exp(self.q)[None, :, None, None]
-                qInv = torch.exp(-self.q)
-            kkt = F.conv2d(self.kernel, self.kernel, padding=self.kernel.shape[-1] - 1)
+        method = "abs"
+        if method == "abs":
+            q = torch.abs(self.q)[None, :, None, None]
+            qInv = 1 / torch.abs(self.q)
+        elif method == "exp":
+            q = torch.exp(self.q)[None, :, None, None]
+            qInv = torch.exp(-self.q)
+        kkt = F.conv2d(self.kernel, self.kernel, padding=self.kernel.shape[-1] - 1)
 
-            T = (torch.abs(q * kkt).sum((1, 2, 3)) * qInv)[None, :, None, None]
+        T = (torch.abs(q * kkt).sum((1, 2, 3)) * qInv)[None, :, None, None]
         return T
 
     def forward(self, x):
@@ -133,7 +126,7 @@ class SDPBasedLipschitzConvLayer(nn.Module):
 
 class SDPBasedLipschitzLinearLayer(nn.Module):
 
-    def __init__(self, config, cin, cout, epsilon=1e-6, activation='relu', cpl=False):
+    def __init__(self, config, cin, cout, epsilon=1e-6, activation='relu'):
         super(SDPBasedLipschitzLinearLayer, self).__init__()
 
         self.slopeDictionary = SlopeDictionary(activation)
@@ -173,24 +166,18 @@ class SDPBasedLipschitzLinearLayer(nn.Module):
         self.aEigen = nn.Parameter(normalize(torch.randn((1, cout))), requires_grad=False)
         # self.aEigen = normalize(torch.randn((1, cout))).to(torch.device("cuda:0"))
 
-        self.cpl = cpl
 
     def computeT(self):
-        if self.cpl:
-            with torch.no_grad():
-                self.wEigen.data = normalize(self.wEigen @ self.weights.T @ self.weights)
-            T = torch.linalg.norm((self.wEigen @ self.weights.T).flatten(), 2) ** 2 * torch.ones_like(self.aEigen)[0, :]
-        else:
-            method = "abs"  # "abs", "exp
-            if method == "abs":
-                q_abs = torch.abs(self.q)
-                q = q_abs[None, :]
-                q_inv = (1 / (q_abs + self.epsilon))[:, None]
-            elif method == "exp":
-                q = torch.exp(self.q)[None, :]
-                q_inv = torch.exp(-self.q)[:, None]
+        method = "abs"  # "abs", "exp
+        if method == "abs":
+            q_abs = torch.abs(self.q)
+            q = q_abs[None, :]
+            q_inv = (1 / (q_abs + self.epsilon))[:, None]
+        elif method == "exp":
+            q = torch.exp(self.q)[None, :]
+            q_inv = torch.exp(-self.q)[:, None]
 
-            T = torch.abs(q_inv * self.weights @ self.weights.T * q).sum(1)
+        T = torch.abs(q_inv * self.weights @ self.weights.T * q).sum(1)
         return T
 
     def forward(self, x):
