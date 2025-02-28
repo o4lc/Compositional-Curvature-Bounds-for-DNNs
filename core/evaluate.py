@@ -406,39 +406,64 @@ class Evaluator:
     #     return accuracy, certified
     
     def secondOrderCert(self, inputs, margins, index, useQueryCoefficients=False):
-        queryCoefficient = torch.zeros(inputs.shape[0], self.model.module.model.n_classes).cuda()
-        queryCoefficient[torch.arange(inputs.shape[0]), index[:, -1]] += 1
-        queryCoefficient[torch.arange(inputs.shape[0]), index[:, -2]] += -1
-        def grad_f(x):
-            return torch.einsum('ij,ij->i', queryCoefficient, self.model(x))
+        certRadii = []
+        gradNorms = []
+        Ms = []
+        allCurvatures = []
 
-        # print(inputs.shape, queryCoefficient.shape)
-        grad = jacobian(grad_f, inputs).sum(dim=1).reshape(inputs.shape[0], -1)
-        grad_norm = torch.linalg.norm(grad, 2, dim=1, keepdim=True)
-        normalizedInputs = self.model.module.normalize(inputs)  # We make the assumption that the normalization only
-        # shifts the mean and does not alter the variance.
-        anchorDerivativeTerm = False
-        returnAll = True
-        with torch.no_grad():
-            if useQueryCoefficients:
-                M, allActiveCurvatures =\
-                    self.model.module.model.calculateCurvature(queryCoefficient,
-                                                               localPoints=normalizedInputs,
-                                                               returnAll=returnAll,
-                                                               anchorDerivativeTerm=anchorDerivativeTerm)
+        for i in range(index.shape[1] - 1):
+            queryCoefficient = torch.zeros(inputs.shape[0], self.model.module.model.n_classes).cuda()
+            queryCoefficient[torch.arange(inputs.shape[0]), index[:, -1]] += 1
+            queryCoefficient[torch.arange(inputs.shape[0]), index[:, -2 - i]] += -1
+            def grad_f(x):
+                return torch.einsum('ij,ij->i', queryCoefficient, self.model(x))
+
+            # print(inputs.shape, queryCoefficient.shape)
+            grad = jacobian(grad_f, inputs).sum(dim=1).reshape(inputs.shape[0], -1)
+            grad_norm = torch.linalg.norm(grad, 2, dim=1, keepdim=True)
+            normalizedInputs = self.model.module.normalize(inputs)  # We make the assumption that the normalization only
+            # shifts the mean and does not alter the variance.
+            anchorDerivativeTerm = False
+            returnAll = True
+            with torch.no_grad():
+                if useQueryCoefficients:
+                    M, allActiveCurvatures =\
+                        self.model.module.model.calculateCurvature(queryCoefficient,
+                                                                   localPoints=normalizedInputs,
+                                                                   returnAll=returnAll,
+                                                                   anchorDerivativeTerm=anchorDerivativeTerm)
+                else:
+                    M, allActiveCurvatures =\
+                        self.model.module.model.calculateCurvature(localPoints=normalizedInputs,
+                                                                   returnAll=returnAll,
+                                                                   anchorDerivativeTerm=anchorDerivativeTerm)
+            if M.shape != grad_norm.shape:
+                M = M * torch.ones_like(grad_norm)
+            if True:
+                diff = margins[:, -2:-1] - margins[:, -1:]
+                cert_rad = (-grad_norm + torch.sqrt(grad_norm**2 - 2 * M * diff)) / M
             else:
-                M, allActiveCurvatures =\
-                    self.model.module.model.calculateCurvature(localPoints=normalizedInputs,
-                                                               returnAll=returnAll,
-                                                               anchorDerivativeTerm=anchorDerivativeTerm)
-        if M.shape != grad_norm.shape:
-            M = M * torch.ones_like(grad_norm)
-        if True:
-            diff = margins[:, -2:-1] - margins[:, -1:]
-            cert_rad = (-grad_norm + torch.sqrt(grad_norm**2 - 2 * M * diff)) / M
-        else:
-            assert M.numel() == 1  # M shouldn't be local
-            cert_rad = newton_step_cert(inputs, index[:, -1], index[:, -2], self.model, M, queryCoefficient)
+                assert M.numel() == 1  # M shouldn't be local
+                cert_rad = newton_step_cert(inputs, index[:, -1], index[:, -2], self.model, M, queryCoefficient)
+
+            certRadii.append(cert_rad)
+            gradNorms.append(grad_norm)
+            Ms.append(M)
+            allCurvatures.append(allActiveCurvatures)
+
+        certRadii = torch.hstack(certRadii)
+        gradNorms = torch.hstack(gradNorms)
+        Ms = torch.hstack(Ms)
+
+        minIndices = torch.argmin(certRadii, 1)
+        cert_rad = certRadii[torch.arange(certRadii.shape[0]), minIndices].unsqueeze(1)
+        grad_norm = gradNorms[torch.arange(gradNorms.shape[0]), minIndices].unsqueeze(1)
+        M = Ms[torch.arange(Ms.shape[0]), minIndices].unsqueeze(1)
+        realAllActiveCurvatures = [[] for _ in range(len(allActiveCurvatures))]
+        for batchIndex, i in enumerate(minIndices):
+            for j in range(len(allActiveCurvatures)):
+                realAllActiveCurvatures[j].append(allCurvatures[i][j][batchIndex])
+        allActiveCurvatures = [torch.vstack(realAllActiveCurvatures[i]) for i in range(len(realAllActiveCurvatures))]
 
         return cert_rad, grad_norm, M, allActiveCurvatures
 
