@@ -440,11 +440,11 @@ class Evaluator:
             if M.shape != grad_norm.shape:
                 M = M * torch.ones_like(grad_norm)
             if True:
-                diff = margins[:, -2:-1] - margins[:, -1:]
+                diff = margins[:, -2 - i:-1 - i] - margins[:, -1:]
                 cert_rad = (-grad_norm + torch.sqrt(grad_norm**2 - 2 * M * diff)) / M
             else:
                 assert M.numel() == 1  # M shouldn't be local
-                cert_rad = newton_step_cert(inputs, index[:, -1], index[:, -2], self.model, M, queryCoefficient)
+                cert_rad = newton_step_cert(inputs, index[:, -1], index[:, -2 - i], self.model, M, queryCoefficient)
 
             certRadii.append(cert_rad)
             gradNorms.append(grad_norm)
