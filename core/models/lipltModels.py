@@ -740,9 +740,9 @@ class SequentialLipltLipschitz(SequentialNaiveLipschitz):
             self.applyPowerIteration()
         ms = [1] + self.calculateSubNetsImprovedLipschitz()
         # Assuming that the Lipschitz constant of the activation layers are 1. This is used a couple of times in this code.
-        offset = 1
+        offset = 2
         if self.singleFullyConnected:
-            offset = 2
+            offset = 1
         allCurvatures = []
         curvature = torch.tensor([0.]).to(self.device)
         for i in range(len(self.indexMap) - offset):
